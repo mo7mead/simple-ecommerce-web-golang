@@ -1,0 +1,19 @@
+{{define "content"}}
+<div class="section-title">Active sessions</div>
+{{if .Sessions}}
+<table>
+	<thead><tr><th>User</th><th>Started</th><th>Expires</th></tr></thead>
+	<tbody>
+		{{range .Sessions}}
+		<tr>
+			<td>{{.Username}}</td>
+			<td>{{fmtTime .CreatedAt}}</td>
+			<td>{{fmtTime .ExpiresAt}}</td>
+		</tr>
+		{{end}}
+	</tbody>
+</table>
+{{else}}
+<p class="muted">No active sessions.</p>
+{{end}}
+{{end}}

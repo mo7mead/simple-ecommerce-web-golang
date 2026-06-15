@@ -1,0 +1,86 @@
+{{define "content"}}
+<p class="page-sub">Organize your shop into a hierarchy. Slug is generated from the name automatically.</p>
+
+{{if .Error}}<div class="alert error">{{.Error}}</div>{{end}}
+
+<div class="slides-layout">
+	<form method="POST" action="/admin/categories" class="upload-card">
+		<div class="upload-card-head">
+			<h2>New category</h2>
+		</div>
+
+		<label class="field">
+			<span class="field-label">Name</span>
+			<input type="text" name="name" required maxlength="120" placeholder="Electronics" data-name>
+		</label>
+
+		<label class="field">
+			<span class="field-label">Slug <span class="muted">(auto)</span></span>
+			<input type="text" readonly placeholder="electronics" data-slug-preview style="background: #f7f8fa; color: var(--muted);">
+		</label>
+
+		<label class="field">
+			<span class="field-label">Icon <span class="muted">(emoji or short text)</span></span>
+			<input type="text" name="icon" maxlength="32" placeholder="📱" style="font-size: 18px;">
+		</label>
+
+		<label class="field">
+			<span class="field-label">Parent category</span>
+			<select name="parent_id">
+				<option value="">— Top level —</option>
+				{{range .FlatCats}}<option value="{{.ID}}">{{if .ParentID.Valid}}{{repeat "— " (.Position)}}{{end}}{{.Name}}</option>{{end}}
+			</select>
+		</label>
+
+		<div class="upload-card-actions">
+			<button type="submit" class="btn primary">Add category</button>
+		</div>
+	</form>
+
+	<div>
+		<div class="section-head">
+			<div class="section-title" style="margin: 0;">Category tree</div>
+			<span class="badge-count">{{len .FlatCats}}</span>
+		</div>
+
+		{{if .Categories}}
+		<div class="cat-tree">{{range .Categories}}{{template "catRow" .}}{{end}}</div>
+		{{else}}
+		<div class="empty-state">
+			<div class="empty-icon">📂</div>
+			<div class="empty-title">No categories yet</div>
+			<p class="muted">Add a top-level category with the form to get started.</p>
+		</div>
+		{{end}}
+	</div>
+</div>
+
+<script>
+(function() {
+	var name = document.querySelector('[data-name]');
+	var preview = document.querySelector('[data-slug-preview]');
+	if (!name || !preview) return;
+	function slugify(s) {
+		return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+	}
+	name.addEventListener('input', function() {
+		preview.value = slugify(name.value);
+	});
+})();
+</script>
+{{end}}
+
+{{define "catRow"}}
+<div class="cat-row">
+	<div class="cat-row-line">
+		{{if .Icon}}<span class="cat-row-ico">{{.Icon}}</span>{{end}}
+		<span class="cat-row-name">{{.Name}}</span>
+		<span class="cat-row-slug muted">/{{.Slug}}</span>
+		<form method="POST" action="/admin/categories/delete" style="margin-left: auto; margin-bottom: 0;">
+			<input type="hidden" name="id" value="{{.ID}}">
+			<button type="submit" class="action-btn" onclick="return confirm('Delete this category and all its children?')">Delete</button>
+		</form>
+	</div>
+	{{if .Children}}<div class="cat-row-children">{{range .Children}}{{template "catRow" .}}{{end}}</div>{{end}}
+</div>
+{{end}}

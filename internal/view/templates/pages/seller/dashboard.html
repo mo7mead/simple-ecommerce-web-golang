@@ -1,0 +1,40 @@
+{{define "content"}}
+<div class="cards">
+	<div class="card">
+		<div class="label">Products</div>
+		<div class="value">{{.SellerStats.TotalProducts}}</div>
+	</div>
+	<div class="card">
+		<div class="label">Total stock</div>
+		<div class="value">{{.SellerStats.TotalStock}}</div>
+	</div>
+	<div class="card">
+		<div class="label">Inventory value</div>
+		<div class="value">${{printf "%.2f" .SellerStats.InventoryValue}}</div>
+	</div>
+	<div class="card">
+		<div class="label">Account created</div>
+		<div class="value" style="font-size: 16px;">{{fmtTime .User.CreatedAt}}</div>
+	</div>
+</div>
+
+<div class="section-title">Recent products</div>
+{{if .SellerStats.RecentProducts}}
+<table>
+	<thead><tr><th>ID</th><th>Name</th><th>Price</th><th>Stock</th><th>Added</th></tr></thead>
+	<tbody>
+		{{range .SellerStats.RecentProducts}}
+		<tr>
+			<td>{{.ID}}</td>
+			<td>{{.Name}}</td>
+			<td>${{printf "%.2f" .Price}}</td>
+			<td>{{.Stock}}</td>
+			<td>{{fmtTime .CreatedAt}}</td>
+		</tr>
+		{{end}}
+	</tbody>
+</table>
+{{else}}
+<p class="muted">No products yet — <a href="/seller/products">add your first one</a>.</p>
+{{end}}
+{{end}}

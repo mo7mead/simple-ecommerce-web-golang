@@ -1,0 +1,40 @@
+{{define "content"}}
+<p>Signed in as <strong>{{.User.Username}}</strong>.</p>
+
+<div class="cards">
+	<div class="card">
+		<div class="label">Total users</div>
+		<div class="value">{{.Stats.TotalUsers}}</div>
+	</div>
+	<div class="card">
+		<div class="label">Active sessions</div>
+		<div class="value">{{.Stats.ActiveSessions}}</div>
+	</div>
+	<div class="card">
+		<div class="label">Your session age</div>
+		<div class="value">{{fmtDur .Stats.YourSessionAge}}</div>
+	</div>
+	<div class="card">
+		<div class="label">Account created</div>
+		<div class="value" style="font-size: 16px;">{{fmtTime .User.CreatedAt}}</div>
+	</div>
+</div>
+
+<div class="section-title">Recent sessions</div>
+{{if .Stats.RecentSessions}}
+<table>
+	<thead><tr><th>User</th><th>Started</th><th>Expires</th></tr></thead>
+	<tbody>
+		{{range .Stats.RecentSessions}}
+		<tr>
+			<td>{{.Username}}</td>
+			<td>{{fmtTime .CreatedAt}}</td>
+			<td>{{fmtTime .ExpiresAt}}</td>
+		</tr>
+		{{end}}
+	</tbody>
+</table>
+{{else}}
+<p style="color: var(--muted);">No sessions recorded yet.</p>
+{{end}}
+{{end}}

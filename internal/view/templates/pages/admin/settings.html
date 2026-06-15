@@ -1,0 +1,18 @@
+{{define "content"}}
+<div class="cards">
+	<div class="card">
+		<div class="label">Database</div>
+		<div class="value" style="font-size: 16px;">MySQL</div>
+		<p class="muted" style="margin-top: 8px; font-size: 13px;">Configured via <code>.env</code></p>
+	</div>
+	<div class="card">
+		<div class="label">Session TTL</div>
+		<div class="value" style="font-size: 16px;">24h</div>
+	</div>
+	<div class="card">
+		<div class="label">Go version</div>
+		<div class="value" style="font-size: 16px;">{{.GoVersion}}</div>
+	</div>
+</div>
+<p class="muted">Settings management is not implemented in this demo.</p>
+{{end}}

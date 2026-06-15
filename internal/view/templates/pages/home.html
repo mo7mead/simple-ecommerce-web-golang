@@ -1,0 +1,107 @@
+{{define "content"}}
+{{if .Slides}}
+<div class="slider" data-slider>
+	<div class="track" data-track>
+		{{range .Slides}}
+		<div class="slide">
+			<img src="{{.ImagePath}}" alt="{{.Title}}">
+			<div class="caption"><h3>{{.Title}}</h3>{{if .Body}}<p>{{.Body}}</p>{{end}}</div>
+		</div>
+		{{end}}
+	</div>
+	{{if gt (len .Slides) 1}}
+	<button type="button" class="nav prev" data-prev>‹</button>
+	<button type="button" class="nav next" data-next>›</button>
+	<div class="dots" data-dots>
+		{{range $i, $_ := .Slides}}<button type="button" data-dot="{{$i}}"{{if eq $i 0}} class="active"{{end}}></button>{{end}}
+	</div>
+	{{end}}
+</div>
+<script>
+(function() {
+	var root = document.querySelector('[data-slider]');
+	if (!root) return;
+	var track = root.querySelector('[data-track]');
+	var dots = root.querySelectorAll('[data-dot]');
+	var total = track.children.length;
+	if (total < 2) return;
+	var i = 0;
+	function go(n) {
+		i = (n + total) % total;
+		track.style.transform = 'translateX(-' + (i * 100) + '%)';
+		dots.forEach(function(d, k) { d.classList.toggle('active', k === i); });
+	}
+	root.querySelector('[data-prev]').addEventListener('click', function() { go(i - 1); restart(); });
+	root.querySelector('[data-next]').addEventListener('click', function() { go(i + 1); restart(); });
+	dots.forEach(function(d, k) { d.addEventListener('click', function() { go(k); restart(); }); });
+	var timer = setInterval(function() { go(i + 1); }, 5000);
+	function restart() { clearInterval(timer); timer = setInterval(function() { go(i + 1); }, 5000); }
+})();
+</script>
+{{end}}
+
+<section class="hero">
+	<div class="hero-text">
+		<span class="eyebrow">Smple Web App</span>
+		<h2>A tiny Go web app with real roles, real sessions, real data.</h2>
+		<p>Built on the standard library, MySQL, embedded templates, and bcrypt-backed auth. Two role-scoped dashboards out of the box — admin and seller.</p>
+		<div class="cta">
+			{{if .User}}
+				{{if eq .User.Role "seller"}}
+					<a class="btn primary" href="/seller/dashboard">Open seller dashboard</a>
+				{{else}}
+					<a class="btn primary" href="/admin/dashboard">Open admin dashboard</a>
+				{{end}}
+				<a class="btn ghost" href="/logout">Log out</a>
+			{{else}}
+				<a class="btn primary" href="/login">Sign in</a>
+				<a class="btn ghost" href="/about">Learn more</a>
+			{{end}}
+		</div>
+		<div class="creds">
+			<strong>Demo accounts:</strong>
+			<code>admin / admin</code> &middot;
+			<code>seller / seller</code>
+		</div>
+	</div>
+	<div class="hero-card">
+		<div class="hero-card-row"><span>GET</span> <code>/</code></div>
+		<div class="hero-card-row"><span>GET</span> <code>/admin/dashboard</code></div>
+		<div class="hero-card-row"><span>GET</span> <code>/seller/products</code></div>
+		<div class="hero-card-row"><span>POST</span> <code>/login</code></div>
+		<div class="hero-card-row last"><span>200</span> <code>MySQL · go{{.GoVersion}}</code></div>
+	</div>
+</section>
+
+<div class="section-title">What's inside</div>
+<div class="cards">
+	<div class="card">
+		<div class="card-icon">🔐</div>
+		<div class="card-title">Sessions in MySQL</div>
+		<p class="muted">32-byte random tokens, 24h TTL, FK cascade on user delete, hourly purge of expired rows.</p>
+	</div>
+	<div class="card">
+		<div class="card-icon">🧭</div>
+		<div class="card-title">Role-based routing</div>
+		<p class="muted">RequireRole middleware returns 403 on mismatch. Login redirect goes to the role's home page.</p>
+	</div>
+	<div class="card">
+		<div class="card-icon">🎨</div>
+		<div class="card-title">Three layouts</div>
+		<p class="muted">Public top-nav, admin sidebar, seller sidebar — chosen automatically by template path.</p>
+	</div>
+	<div class="card">
+		<div class="card-icon">📦</div>
+		<div class="card-title">Self-contained binary</div>
+		<p class="muted">Templates embedded via <code>//go:embed</code>. No template files to deploy alongside.</p>
+	</div>
+</div>
+
+<div class="section-title">Stack</div>
+<ul class="stack">
+	<li><strong>Go</strong> · standard <code>net/http</code> + <code>html/template</code></li>
+	<li><strong>MySQL</strong> · <code>go-sql-driver/mysql</code> with connection pooling</li>
+	<li><strong>godotenv</strong> · <code>.env</code> loaded at startup, real env wins</li>
+	<li><strong>bcrypt</strong> · password hashing via <code>golang.org/x/crypto</code></li>
+</ul>
+{{end}}

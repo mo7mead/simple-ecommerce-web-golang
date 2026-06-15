@@ -1,0 +1,96 @@
+{{define "content"}}
+<p class="page-sub">Set your site name, tagline, and logo. These appear in the top navbar of the public site.</p>
+
+{{if .Error}}<div class="alert error">{{.Error}}</div>{{end}}
+
+<div class="slides-layout">
+	<form method="POST" action="/admin/branding" enctype="multipart/form-data" class="upload-card">
+		<div class="upload-card-head">
+			<h2>Branding</h2>
+		</div>
+
+		<label class="field">
+			<span class="field-label">Site name</span>
+			<input type="text" name="site_name" required maxlength="80" value="{{.Site.SiteName}}" placeholder="Simple Web App">
+		</label>
+
+		<label class="field">
+			<span class="field-label">Tagline <span class="muted">(optional)</span></span>
+			<input type="text" name="tagline" maxlength="120" value="{{.Site.Tagline}}" placeholder="A tiny Go web app">
+		</label>
+
+		<div class="field">
+			<span class="field-label">Logo {{if .Site.LogoPath}}<span class="muted">(current shown below; leave empty to keep)</span>{{end}}</span>
+			{{if .Site.LogoPath}}
+			<div class="logo-swatch">
+				<div class="logo-swatch-img"><img src="{{.Site.LogoPath}}" alt=""></div>
+				<form method="POST" action="/admin/branding/logo-delete" style="margin: 0;">
+					<button type="submit" class="action-btn" style="color: #ff9b9b;" onclick="return confirm('Remove logo?')">Remove</button>
+				</form>
+			</div>
+			{{end}}
+			<label class="dropzone" data-dropzone style="margin-top: 0;">
+				<input type="file" name="logo" accept="image/*" data-file hidden>
+				<div class="dropzone-empty" data-empty>
+					<div class="dropzone-icon">⬆</div>
+					<div><strong>Upload a new logo</strong></div>
+					<div class="muted" style="font-size: 13px; margin-top: 4px;">PNG/SVG, transparent background recommended</div>
+				</div>
+				<div class="dropzone-preview logo-preview" data-preview hidden>
+					<div class="logo-preview-frame"><img data-preview-img alt=""></div>
+					<div class="dropzone-filename" data-filename></div>
+					<button type="button" class="link-btn" data-clear>Replace</button>
+				</div>
+			</label>
+		</div>
+
+		<div class="upload-card-actions">
+			<button type="submit" class="btn primary">Save branding</button>
+		</div>
+	</form>
+
+	<div>
+		<div class="section-head">
+			<div class="section-title" style="margin: 0;">Preview</div>
+		</div>
+		<div class="brand-preview">
+			<div class="brand-preview-nav">
+				{{if .Site.LogoPath}}<img src="{{.Site.LogoPath}}" alt="">{{end}}
+				<div>
+					<div class="brand-preview-name">{{.Site.SiteName}}</div>
+					{{if .Site.Tagline}}<div class="brand-preview-tag">{{.Site.Tagline}}</div>{{end}}
+				</div>
+			</div>
+		</div>
+		<p class="muted" style="font-size: 13px; margin-top: 16px;">Visit <a href="/">the home page</a> to see it live.</p>
+	</div>
+</div>
+
+<script>
+(function() {
+	var dz = document.querySelector('[data-dropzone]');
+	if (!dz) return;
+	var input = dz.querySelector('[data-file]');
+	var empty = dz.querySelector('[data-empty]');
+	var preview = dz.querySelector('[data-preview]');
+	var img = dz.querySelector('[data-preview-img]');
+	var name = dz.querySelector('[data-filename]');
+	var clear = dz.querySelector('[data-clear]');
+	function show(file) {
+		img.src = URL.createObjectURL(file);
+		name.textContent = file.name + ' · ' + Math.round(file.size / 1024) + ' KB';
+		empty.hidden = true; preview.hidden = false;
+	}
+	function reset() { input.value = ''; empty.hidden = false; preview.hidden = true; }
+	input.addEventListener('change', function() { if (input.files[0]) show(input.files[0]); });
+	clear.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); reset(); });
+	['dragenter','dragover'].forEach(function(e){ dz.addEventListener(e, function(ev){ ev.preventDefault(); dz.classList.add('drag'); }); });
+	['dragleave','drop'].forEach(function(e){ dz.addEventListener(e, function(ev){ ev.preventDefault(); dz.classList.remove('drag'); }); });
+	dz.addEventListener('drop', function(e) {
+		var f = e.dataTransfer.files && e.dataTransfer.files[0];
+		if (!f) return;
+		var dt = new DataTransfer(); dt.items.add(f); input.files = dt.files; show(f);
+	});
+})();
+</script>
+{{end}}

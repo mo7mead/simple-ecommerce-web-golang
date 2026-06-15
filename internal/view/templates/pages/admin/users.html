@@ -1,0 +1,19 @@
+{{define "content"}}
+<div class="section-title">All users</div>
+{{if .Users}}
+<table>
+	<thead><tr><th>ID</th><th>Username</th><th>Created</th></tr></thead>
+	<tbody>
+		{{range .Users}}
+		<tr>
+			<td>{{.ID}}</td>
+			<td>{{.Username}}</td>
+			<td>{{fmtTime .CreatedAt}}</td>
+		</tr>
+		{{end}}
+	</tbody>
+</table>
+{{else}}
+<p class="muted">No users yet.</p>
+{{end}}
+{{end}}

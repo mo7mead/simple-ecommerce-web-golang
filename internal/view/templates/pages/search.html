@@ -1,0 +1,49 @@
+{{define "content"}}
+{{if .Search.Query}}
+<p class="muted" style="margin: -8px 0 24px;">{{len .Search.Categories}} categor{{if eq (len .Search.Categories) 1}}y{{else}}ies{{end}} and {{len .Search.Products}} product{{if ne (len .Search.Products) 1}}s{{end}} for <strong style="color: var(--ink);">"{{.Search.Query}}"</strong></p>
+
+{{if .Search.Categories}}
+<div class="section-title">Categories</div>
+<div class="cat-grid">
+	{{range .Search.Categories}}
+	<a class="cat-card" href="/c/{{.Slug}}">
+		{{if .Icon}}<div class="cat-card-ico">{{.Icon}}</div>{{end}}
+		<div class="cat-card-name">{{.Name}}</div>
+		<div class="cat-card-slug muted">/c/{{.Slug}}</div>
+	</a>
+	{{end}}
+</div>
+{{end}}
+
+{{if .Search.Products}}
+<div class="section-title" style="margin-top: 32px;">Products</div>
+<table>
+	<thead><tr><th>Name</th><th>Price</th><th>Stock</th></tr></thead>
+	<tbody>
+		{{range .Search.Products}}
+		<tr>
+			<td>{{.Name}}</td>
+			<td>${{printf "%.2f" .Price}}</td>
+			<td>{{.Stock}}</td>
+		</tr>
+		{{end}}
+	</tbody>
+</table>
+{{end}}
+
+{{if and (not .Search.Categories) (not .Search.Products)}}
+<div class="empty-state">
+	<div class="empty-icon">🔍</div>
+	<div class="empty-title">No matches</div>
+	<p class="muted">Nothing matched "{{.Search.Query}}". Try a different keyword.</p>
+</div>
+{{end}}
+
+{{else}}
+<div class="empty-state">
+	<div class="empty-icon">🔎</div>
+	<div class="empty-title">Search</div>
+	<p class="muted">Type a query in the navbar to search categories and products.</p>
+</div>
+{{end}}
+{{end}}

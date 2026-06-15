@@ -1,0 +1,124 @@
+{{define "layout"}}<!DOCTYPE html>
+<html>
+<head>
+	<title>{{.Title}} · Admin</title>
+	<script>try{if(localStorage.getItem('side-collapsed')==='1')document.documentElement.classList.add('side-collapsed');}catch(e){}</script>
+	{{template "styles"}}
+	<style>
+		html, body { height: 100vh; overflow: hidden; }
+		body { display: grid; grid-template-columns: var(--side-w, 220px) 1fr; grid-template-rows: 100vh; transition: grid-template-columns 0.2s ease; }
+		html.side-collapsed body { --side-w: 64px; }
+		aside { background: var(--sidebar); color: #d7d9de; padding: 16px 0; display: flex; flex-direction: column; overflow: hidden; }
+		aside .brand { color: #fff; font-weight: 700; font-size: 18px; padding: 0 16px 16px; border-bottom: 1px solid #2a2e36; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+		aside .brand .brand-text { white-space: nowrap; overflow: hidden; }
+		aside .brand span { color: var(--accent); }
+		aside .toggle { background: transparent; border: 0; color: #9aa0a6; cursor: pointer; padding: 4px 6px; border-radius: 6px; display: flex; align-items: center; justify-content: center; }
+		aside .toggle:hover { background: var(--sidebar-hover); color: #fff; }
+		aside .toggle svg { width: 16px; height: 16px; transition: transform 0.2s; }
+		html.side-collapsed aside .toggle svg { transform: rotate(180deg); }
+		aside nav { display: flex; flex-direction: column; }
+		aside nav a { color: #d7d9de; text-decoration: none; padding: 10px 16px; font-size: 14px; border-left: 3px solid transparent; display: flex; align-items: center; gap: 12px; white-space: nowrap; }
+		aside nav a:hover { background: var(--sidebar-hover); color: #fff; }
+		aside nav a.active { background: var(--sidebar-hover); color: #fff; border-left-color: var(--accent); }
+		aside .ico { width: 18px; height: 18px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; }
+		aside .ico svg { width: 18px; height: 18px; }
+		aside .footer a { display: inline-flex; align-items: center; gap: 8px; }
+		aside nav .group-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #6b7280; padding: 14px 16px 4px; }
+		aside .footer { margin-top: auto; padding: 14px 16px; border-top: 1px solid #2a2e36; font-size: 13px; color: #9aa0a6; }
+		aside .footer a { color: var(--accent); text-decoration: none; }
+
+		html.side-collapsed aside .brand-text,
+		html.side-collapsed aside nav a .lbl,
+		html.side-collapsed aside .group-title,
+		html.side-collapsed aside .footer .footer-text,
+		html.side-collapsed aside .footer .footer-text-inline { display: none; }
+		html.side-collapsed aside .brand { justify-content: center; padding: 0 0 16px; }
+		html.side-collapsed aside nav a { justify-content: center; padding: 12px 0; border-left: 0; border-right: 3px solid transparent; }
+		html.side-collapsed aside nav a.active { border-left: 0; border-right-color: var(--accent); }
+		html.side-collapsed aside .footer { padding: 12px 0; text-align: center; }
+
+		.content { display: flex; flex-direction: column; min-width: 0; height: 100vh; }
+		.topbar { background: var(--card); border-bottom: 1px solid var(--border); padding: 14px 32px; display: flex; align-items: center; flex-shrink: 0; }
+		.topbar .spacer { flex: 1; }
+		.topbar .crumb { color: var(--muted); font-size: 14px; }
+		.topbar .user { font-size: 14px; color: #374151; }
+		main { padding: 32px; flex: 1; overflow-y: auto; min-height: 0; }
+	</style>
+</head>
+<body>
+	<aside>
+		<div class="brand">
+			<span class="brand-text">Smple<span>Admin</span></span>
+			<button type="button" class="toggle" data-side-toggle title="Toggle sidebar">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+			</button>
+		</div>
+		<nav>
+			<div class="group-title">Overview</div>
+			<a href="/admin/dashboard" class="{{if eq .Active "dashboard"}}active{{end}}" title="Dashboard">
+				<span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></span>
+				<span class="lbl">Dashboard</span>
+			</a>
+			<div class="group-title">Content</div>
+			<a href="/admin/slides" class="{{if eq .Active "slides"}}active{{end}}" title="Home slides">
+				<span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></span>
+				<span class="lbl">Home slides</span>
+			</a>
+			<a href="/admin/categories" class="{{if eq .Active "categories"}}active{{end}}" title="Categories">
+				<span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
+				<span class="lbl">Categories</span>
+			</a>
+			<a href="/admin/branding" class="{{if eq .Active "branding"}}active{{end}}" title="Branding">
+				<span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 14l4-8 4 8"/><line x1="9.5" y1="11" x2="14.5" y2="11"/></svg></span>
+				<span class="lbl">Branding</span>
+			</a>
+			<div class="group-title">Manage</div>
+			<a href="/admin/users" class="{{if eq .Active "users"}}active{{end}}" title="Users">
+				<span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+				<span class="lbl">Users</span>
+			</a>
+			<a href="/admin/sessions" class="{{if eq .Active "sessions"}}active{{end}}" title="Sessions">
+				<span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>
+				<span class="lbl">Sessions</span>
+			</a>
+			<div class="group-title">System</div>
+			<a href="/admin/settings" class="{{if eq .Active "settings"}}active{{end}}" title="Settings">
+				<span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+				<span class="lbl">Settings</span>
+			</a>
+			<a href="/" title="Back to site">
+				<span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg></span>
+				<span class="lbl">Back to site</span>
+			</a>
+		</nav>
+		<div class="footer">
+			<div class="footer-text">Signed in as<br><strong>{{.User.Username}}</strong><br></div>
+			<a href="/logout" title="Log out">
+				<span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle;"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>
+				<span class="footer-text-inline">Log out</span>
+			</a>
+		</div>
+	</aside>
+	<div class="content">
+		<div class="topbar">
+			<span class="crumb">Admin / {{.Title}}</span>
+			<span class="spacer"></span>
+			<span class="user">{{.User.Username}}</span>
+		</div>
+		<main>
+			<h1>{{.Title}}</h1>
+			{{template "content" .}}
+		</main>
+	</div>
+	<script>
+	(function() {
+		var btn = document.querySelector('[data-side-toggle]');
+		if (!btn) return;
+		btn.addEventListener('click', function() {
+			var on = document.documentElement.classList.toggle('side-collapsed');
+			try { localStorage.setItem('side-collapsed', on ? '1' : '0'); } catch (e) {}
+		});
+	})();
+	</script>
+</body>
+</html>{{end}}
