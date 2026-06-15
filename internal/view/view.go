@@ -64,7 +64,8 @@ func Load() (*Views, error) {
 			layout = "templates/layouts/seller.html"
 		}
 		t, err := template.New(path.Base(p)).Funcs(funcs).ParseFS(files,
-			layout, "templates/partials/styles.html", "templates/partials/cat.html", p)
+			layout, "templates/partials/styles.html", "templates/partials/cat.html",
+			"templates/partials/avatar.html", p)
 		if err != nil {
 			return fmt.Errorf("parse %s: %w", p, err)
 		}

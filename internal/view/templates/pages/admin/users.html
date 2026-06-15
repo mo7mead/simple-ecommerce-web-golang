@@ -2,12 +2,22 @@
 <div class="section-title">All users</div>
 {{if .Users}}
 <table>
-	<thead><tr><th>ID</th><th>Username</th><th>Created</th></tr></thead>
+	<thead><tr><th>ID</th><th>User</th><th>Email</th><th>Role</th><th>Created</th></tr></thead>
 	<tbody>
 		{{range .Users}}
 		<tr>
 			<td>{{.ID}}</td>
-			<td>{{.Username}}</td>
+			<td>
+				<div class="avatar-row">
+					<span class="avatar-sm">{{if .AvatarPath}}<img src="{{.AvatarPath}}" alt="">{{else}}{{slice .Username 0 1}}{{end}}</span>
+					<div>
+						<div><strong>{{if .DisplayName}}{{.DisplayName}}{{else}}{{.Username}}{{end}}</strong></div>
+						<div class="muted" style="font-size: 12px;">@{{.Username}}</div>
+					</div>
+				</div>
+			</td>
+			<td class="muted">{{if .Email}}{{.Email}}{{else}}—{{end}}</td>
+			<td><span class="role-badge role-{{.Role}}">{{.Role}}</span></td>
 			<td>{{fmtTime .CreatedAt}}</td>
 		</tr>
 		{{end}}

@@ -6,7 +6,7 @@
 	<tbody>
 		{{range .Sessions}}
 		<tr>
-			<td>{{.Username}}</td>
+			<td><div class="avatar-row"><span class="avatar-sm">{{if .AvatarPath}}<img src="{{.AvatarPath}}" alt="">{{else}}{{slice .Username 0 1}}{{end}}</span>{{.Username}}</div></td>
 			<td>{{fmtTime .CreatedAt}}</td>
 			<td>{{fmtTime .ExpiresAt}}</td>
 		</tr>

@@ -1,40 +1,153 @@
 {{define "content"}}
-<p>Signed in as <strong>{{.User.Username}}</strong>.</p>
-
-<div class="cards">
-	<div class="card">
-		<div class="label">Total users</div>
-		<div class="value">{{.Stats.TotalUsers}}</div>
+<div class="dash-hero">
+	<div>
+		<div class="dash-hero-eyebrow">Admin overview</div>
+		<h2 class="dash-hero-title">Welcome back, {{.User.Username}}</h2>
+		<p class="dash-hero-sub">Session active for {{fmtDur .Stats.YourSessionAge}} · Joined {{fmtTime .User.CreatedAt}}</p>
 	</div>
-	<div class="card">
-		<div class="label">Active sessions</div>
-		<div class="value">{{.Stats.ActiveSessions}}</div>
-	</div>
-	<div class="card">
-		<div class="label">Your session age</div>
-		<div class="value">{{fmtDur .Stats.YourSessionAge}}</div>
-	</div>
-	<div class="card">
-		<div class="label">Account created</div>
-		<div class="value" style="font-size: 16px;">{{fmtTime .User.CreatedAt}}</div>
+	<div class="dash-hero-actions">
+		<a class="btn primary" href="/admin/slides">Add slide</a>
+		<a class="btn ghost" href="/admin/categories">Add category</a>
 	</div>
 </div>
 
-<div class="section-title">Recent sessions</div>
-{{if .Stats.RecentSessions}}
+<div class="kpi-grid">
+	<div class="kpi">
+		<div class="kpi-row">
+			<div class="kpi-label">Users</div>
+			<div class="kpi-icon" style="background:#eef6ff;color:#1c8bf2;">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+			</div>
+		</div>
+		<div class="kpi-value">{{.Stats.TotalUsers}}</div>
+		<div class="kpi-delta {{if gt .Stats.NewUsers7d 0}}up{{end}}">{{if gt .Stats.NewUsers7d 0}}+{{end}}{{.Stats.NewUsers7d}} this week</div>
+		<div class="kpi-breakdown">
+			<span><strong>{{.Stats.TotalAdmins}}</strong> admins</span>
+			<span><strong>{{.Stats.TotalSellers}}</strong> sellers</span>
+		</div>
+	</div>
+
+	<div class="kpi">
+		<div class="kpi-row">
+			<div class="kpi-label">Active sessions</div>
+			<div class="kpi-icon" style="background:#e8f8ee;color:#1f9e4f;">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+			</div>
+		</div>
+		<div class="kpi-value">{{.Stats.ActiveSessions}}</div>
+		<div class="kpi-breakdown"><span>Including yours · {{fmtDur .Stats.YourSessionAge}}</span></div>
+	</div>
+
+	<div class="kpi">
+		<div class="kpi-row">
+			<div class="kpi-label">Catalog</div>
+			<div class="kpi-icon" style="background:#fff0e8;color:#e07b1c;">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+			</div>
+		</div>
+		<div class="kpi-value">{{.Stats.TotalCategories}}</div>
+		<div class="kpi-breakdown"><span>categories live</span></div>
+	</div>
+
+	<div class="kpi">
+		<div class="kpi-row">
+			<div class="kpi-label">Products</div>
+			<div class="kpi-icon" style="background:#f1ebff;color:#7c4ddb;">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+			</div>
+		</div>
+		<div class="kpi-value">{{.Stats.TotalProducts}}</div>
+		<div class="kpi-delta {{if gt .Stats.NewProducts7d 0}}up{{end}}">{{if gt .Stats.NewProducts7d 0}}+{{end}}{{.Stats.NewProducts7d}} this week</div>
+		<div class="kpi-breakdown"><span>Inventory value <strong>${{printf "%.2f" .Stats.InventoryValue}}</strong></span></div>
+	</div>
+
+	<div class="kpi">
+		<div class="kpi-row">
+			<div class="kpi-label">Home slides</div>
+			<div class="kpi-icon" style="background:#fff0f3;color:#d6336c;">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+			</div>
+		</div>
+		<div class="kpi-value">{{.Stats.TotalSlides}}</div>
+		<div class="kpi-breakdown"><span>shown on home page</span></div>
+	</div>
+
+	<div class="kpi">
+		<div class="kpi-row">
+			<div class="kpi-label">Site name</div>
+			<div class="kpi-icon" style="background:#eaf0fa;color:#374151;">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 14l4-8 4 8"/><line x1="9.5" y1="11" x2="14.5" y2="11"/></svg>
+			</div>
+		</div>
+		<div class="kpi-value kpi-value-text">{{.Site.SiteName}}</div>
+		<div class="kpi-breakdown"><a href="/admin/branding">Edit branding →</a></div>
+	</div>
+</div>
+
+<div class="dash-two-col">
+	<div>
+		<div class="section-head">
+			<div class="section-title" style="margin: 0;">Recent sessions</div>
+			<a href="/admin/sessions" class="muted" style="font-size: 13px; text-decoration: none;">View all →</a>
+		</div>
+		{{if .Stats.RecentSessions}}
+		<table>
+			<thead><tr><th>User</th><th>Started</th><th>Expires</th></tr></thead>
+			<tbody>
+				{{range .Stats.RecentSessions}}
+				<tr>
+					<td><div class="avatar-row"><span class="avatar-sm">{{if .AvatarPath}}<img src="{{.AvatarPath}}" alt="">{{else}}{{slice .Username 0 1}}{{end}}</span>{{.Username}}</div></td>
+					<td>{{fmtTime .CreatedAt}}</td>
+					<td>{{fmtTime .ExpiresAt}}</td>
+				</tr>
+				{{end}}
+			</tbody>
+		</table>
+		{{else}}
+		<p class="muted">No sessions yet.</p>
+		{{end}}
+	</div>
+
+	<div>
+		<div class="section-head">
+			<div class="section-title" style="margin: 0;">New users</div>
+			<a href="/admin/users" class="muted" style="font-size: 13px; text-decoration: none;">View all →</a>
+		</div>
+		{{if .Stats.RecentUsers}}
+		<table>
+			<thead><tr><th>Username</th><th>Role</th><th>Joined</th></tr></thead>
+			<tbody>
+				{{range .Stats.RecentUsers}}
+				<tr>
+					<td><div class="avatar-row"><span class="avatar-sm">{{if .AvatarPath}}<img src="{{.AvatarPath}}" alt="">{{else}}{{slice .Username 0 1}}{{end}}</span>{{if .DisplayName}}{{.DisplayName}}{{else}}{{.Username}}{{end}}</div></td>
+					<td><span class="role-badge role-{{.Role}}">{{.Role}}</span></td>
+					<td>{{fmtTime .CreatedAt}}</td>
+				</tr>
+				{{end}}
+			</tbody>
+		</table>
+		{{else}}
+		<p class="muted">No users yet.</p>
+		{{end}}
+	</div>
+</div>
+
+{{if .Stats.RecentProducts}}
+<div class="section-head" style="margin-top: 28px;">
+	<div class="section-title" style="margin: 0;">Latest products from sellers</div>
+</div>
 <table>
-	<thead><tr><th>User</th><th>Started</th><th>Expires</th></tr></thead>
+	<thead><tr><th>Name</th><th>Price</th><th>Stock</th><th>Added</th></tr></thead>
 	<tbody>
-		{{range .Stats.RecentSessions}}
+		{{range .Stats.RecentProducts}}
 		<tr>
-			<td>{{.Username}}</td>
+			<td><strong>{{.Name}}</strong></td>
+			<td>${{printf "%.2f" .Price}}</td>
+			<td>{{.Stock}}</td>
 			<td>{{fmtTime .CreatedAt}}</td>
-			<td>{{fmtTime .ExpiresAt}}</td>
 		</tr>
 		{{end}}
 	</tbody>
 </table>
-{{else}}
-<p style="color: var(--muted);">No sessions recorded yet.</p>
 {{end}}
 {{end}}

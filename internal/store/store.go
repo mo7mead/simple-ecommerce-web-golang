@@ -25,29 +25,45 @@ const (
 )
 
 type User struct {
-	ID        int64
-	Username  string
-	Role      string
-	CreatedAt time.Time
+	ID          int64
+	Username    string
+	DisplayName string
+	Email       string
+	AvatarPath  string
+	CoverPath   string
+	Role        string
+	CreatedAt   time.Time
 }
 
 type Stats struct {
-	TotalUsers     int
-	ActiveSessions int
-	RecentSessions []SessionInfo
-	YourSessionAge time.Duration
+	TotalUsers      int
+	TotalAdmins     int
+	TotalSellers    int
+	ActiveSessions  int
+	TotalCategories int
+	TotalSlides     int
+	TotalProducts   int
+	InventoryValue  float64
+	NewUsers7d      int
+	NewProducts7d   int
+	RecentSessions  []SessionInfo
+	RecentProducts  []Product
+	RecentUsers     []User
+	YourSessionAge  time.Duration
 }
 
 type SessionInfo struct {
-	Username  string
-	CreatedAt time.Time
-	ExpiresAt time.Time
+	Username   string
+	AvatarPath string
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
 }
 
 type Settings struct {
-	SiteName string
-	Tagline  string
-	LogoPath string
+	SiteName    string
+	Tagline     string
+	LogoPath    string
+	AccentColor string
 }
 
 type Category struct {
@@ -100,6 +116,10 @@ func (s *Store) Migrate(ctx context.Context) error {
 			username VARCHAR(64) NOT NULL UNIQUE,
 			password_hash VARBINARY(60) NOT NULL,
 			role VARCHAR(16) NOT NULL DEFAULT 'admin',
+			display_name VARCHAR(120) NOT NULL DEFAULT '',
+			email VARCHAR(160) NOT NULL DEFAULT '',
+			avatar_path VARCHAR(255) NOT NULL DEFAULT '',
+			cover_path VARCHAR(255) NOT NULL DEFAULT '',
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 		`CREATE TABLE IF NOT EXISTS sessions (
@@ -154,6 +174,14 @@ func (s *Store) Migrate(ctx context.Context) error {
 	// Backfill role column for pre-existing installs that lacked it.
 	_, _ = s.db.ExecContext(ctx,
 		`ALTER TABLE users ADD COLUMN role VARCHAR(16) NOT NULL DEFAULT 'admin'`)
+	_, _ = s.db.ExecContext(ctx,
+		`ALTER TABLE users ADD COLUMN display_name VARCHAR(120) NOT NULL DEFAULT ''`)
+	_, _ = s.db.ExecContext(ctx,
+		`ALTER TABLE users ADD COLUMN email VARCHAR(160) NOT NULL DEFAULT ''`)
+	_, _ = s.db.ExecContext(ctx,
+		`ALTER TABLE users ADD COLUMN avatar_path VARCHAR(255) NOT NULL DEFAULT ''`)
+	_, _ = s.db.ExecContext(ctx,
+		`ALTER TABLE users ADD COLUMN cover_path VARCHAR(255) NOT NULL DEFAULT ''`)
 	// Backfill position column for installs created before reordering existed.
 	_, _ = s.db.ExecContext(ctx,
 		`ALTER TABLE slides ADD COLUMN position INT NOT NULL DEFAULT 0`)
@@ -187,8 +215,9 @@ func (s *Store) Authenticate(ctx context.Context, username, password string) (Us
 	var u User
 	var hash []byte
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, username, password_hash, role, created_at FROM users WHERE username = ?`, username,
-	).Scan(&u.ID, &u.Username, &hash, &u.Role, &u.CreatedAt)
+		`SELECT id, username, password_hash, role, display_name, email, avatar_path, cover_path, created_at
+		 FROM users WHERE username = ?`, username,
+	).Scan(&u.ID, &u.Username, &hash, &u.Role, &u.DisplayName, &u.Email, &u.AvatarPath, &u.CoverPath, &u.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrInvalidCredentials
 	}
@@ -199,6 +228,81 @@ func (s *Store) Authenticate(ctx context.Context, username, password string) (Us
 		return User{}, ErrInvalidCredentials
 	}
 	return u, nil
+}
+
+func (s *Store) FindUser(ctx context.Context, id int64) (User, error) {
+	var u User
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, username, role, display_name, email, avatar_path, cover_path, created_at
+		 FROM users WHERE id = ?`, id,
+	).Scan(&u.ID, &u.Username, &u.Role, &u.DisplayName, &u.Email, &u.AvatarPath, &u.CoverPath, &u.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, ErrNotFound
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("query: %w", err)
+	}
+	return u, nil
+}
+
+func (s *Store) UpdateProfile(ctx context.Context, id int64, displayName, email, avatarPath string) error {
+	if avatarPath != "" {
+		_, err := s.db.ExecContext(ctx,
+			`UPDATE users SET display_name = ?, email = ?, avatar_path = ? WHERE id = ?`,
+			displayName, email, avatarPath, id)
+		return err
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE users SET display_name = ?, email = ? WHERE id = ?`,
+		displayName, email, id)
+	return err
+}
+
+func (s *Store) ClearAvatar(ctx context.Context, id int64) (string, error) {
+	var path string
+	err := s.db.QueryRowContext(ctx, `SELECT avatar_path FROM users WHERE id = ?`, id).Scan(&path)
+	if err != nil {
+		return "", err
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE users SET avatar_path = '' WHERE id = ?`, id); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func (s *Store) SetCover(ctx context.Context, id int64, coverPath string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE users SET cover_path = ? WHERE id = ?`, coverPath, id)
+	return err
+}
+
+func (s *Store) ClearCover(ctx context.Context, id int64) (string, error) {
+	var path string
+	err := s.db.QueryRowContext(ctx, `SELECT cover_path FROM users WHERE id = ?`, id).Scan(&path)
+	if err != nil {
+		return "", err
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE users SET cover_path = '' WHERE id = ?`, id); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func (s *Store) ChangePassword(ctx context.Context, id int64, current, newPass string) error {
+	var hash []byte
+	err := s.db.QueryRowContext(ctx, `SELECT password_hash FROM users WHERE id = ?`, id).Scan(&hash)
+	if err != nil {
+		return fmt.Errorf("lookup: %w", err)
+	}
+	if err := bcrypt.CompareHashAndPassword(hash, []byte(current)); err != nil {
+		return ErrInvalidCredentials
+	}
+	newHash, err := bcrypt.GenerateFromPassword([]byte(newPass), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("hash: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx, `UPDATE users SET password_hash = ? WHERE id = ?`, newHash, id)
+	return err
 }
 
 const sessionTTL = 24 * time.Hour
@@ -224,10 +328,10 @@ func (s *Store) UserForSession(ctx context.Context, token string) (User, time.Ti
 	var u User
 	var createdAt time.Time
 	err := s.db.QueryRowContext(ctx, `
-		SELECT u.id, u.username, u.role, u.created_at, s.created_at
+		SELECT u.id, u.username, u.role, u.display_name, u.email, u.avatar_path, u.cover_path, u.created_at, s.created_at
 		FROM sessions s JOIN users u ON u.id = s.user_id
 		WHERE s.token = ? AND s.expires_at > NOW()`, token,
-	).Scan(&u.ID, &u.Username, &u.Role, &u.CreatedAt, &createdAt)
+	).Scan(&u.ID, &u.Username, &u.Role, &u.DisplayName, &u.Email, &u.AvatarPath, &u.CoverPath, &u.CreatedAt, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, time.Time{}, ErrSessionNotFound
 	}
@@ -246,35 +350,85 @@ func (s *Store) Stats(ctx context.Context, currentSessionAge time.Duration) (Sta
 	var st Stats
 	st.YourSessionAge = currentSessionAge
 
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&st.TotalUsers); err != nil {
-		return st, fmt.Errorf("users count: %w", err)
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT
+			COUNT(*),
+			SUM(role = 'admin'),
+			SUM(role = 'seller'),
+			SUM(created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY))
+		FROM users`,
+	).Scan(&st.TotalUsers, &st.TotalAdmins, &st.TotalSellers, &st.NewUsers7d); err != nil {
+		return st, fmt.Errorf("user counts: %w", err)
 	}
 	if err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM sessions WHERE expires_at > NOW()`,
 	).Scan(&st.ActiveSessions); err != nil {
 		return st, fmt.Errorf("sessions count: %w", err)
 	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM categories`).Scan(&st.TotalCategories); err != nil {
+		return st, fmt.Errorf("categories count: %w", err)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM slides`).Scan(&st.TotalSlides); err != nil {
+		return st, fmt.Errorf("slides count: %w", err)
+	}
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*), COALESCE(SUM(price * stock), 0),
+			SUM(created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY))
+		FROM products`,
+	).Scan(&st.TotalProducts, &st.InventoryValue, &st.NewProducts7d); err != nil {
+		return st, fmt.Errorf("products count: %w", err)
+	}
 
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT u.username, s.created_at, s.expires_at
+	if rows, err := s.db.QueryContext(ctx, `
+		SELECT u.username, u.avatar_path, s.created_at, s.expires_at
 		FROM sessions s JOIN users u ON u.id = s.user_id
-		ORDER BY s.created_at DESC LIMIT 5`)
-	if err != nil {
+		ORDER BY s.created_at DESC LIMIT 5`); err == nil {
+		for rows.Next() {
+			var si SessionInfo
+			if err := rows.Scan(&si.Username, &si.AvatarPath, &si.CreatedAt, &si.ExpiresAt); err != nil {
+				rows.Close()
+				return st, fmt.Errorf("scan session: %w", err)
+			}
+			st.RecentSessions = append(st.RecentSessions, si)
+		}
+		rows.Close()
+	} else {
 		return st, fmt.Errorf("recent sessions: %w", err)
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var si SessionInfo
-		if err := rows.Scan(&si.Username, &si.CreatedAt, &si.ExpiresAt); err != nil {
-			return st, fmt.Errorf("scan session: %w", err)
+
+	if rows, err := s.db.QueryContext(ctx, `
+		SELECT id, seller_id, name, price, stock, created_at
+		FROM products ORDER BY created_at DESC, id DESC LIMIT 5`); err == nil {
+		for rows.Next() {
+			var p Product
+			if err := rows.Scan(&p.ID, &p.SellerID, &p.Name, &p.Price, &p.Stock, &p.CreatedAt); err != nil {
+				rows.Close()
+				return st, fmt.Errorf("scan product: %w", err)
+			}
+			st.RecentProducts = append(st.RecentProducts, p)
 		}
-		st.RecentSessions = append(st.RecentSessions, si)
+		rows.Close()
 	}
-	return st, rows.Err()
+
+	if rows, err := s.db.QueryContext(ctx, `
+		SELECT id, username, role, display_name, email, avatar_path, created_at FROM users
+		ORDER BY created_at DESC, id DESC LIMIT 5`); err == nil {
+		for rows.Next() {
+			var u User
+			if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.DisplayName, &u.Email, &u.AvatarPath, &u.CreatedAt); err != nil {
+				rows.Close()
+				return st, fmt.Errorf("scan user: %w", err)
+			}
+			st.RecentUsers = append(st.RecentUsers, u)
+		}
+		rows.Close()
+	}
+	return st, nil
 }
 
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, username, role, created_at FROM users ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, username, role, display_name, email, avatar_path, created_at FROM users ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("query: %w", err)
 	}
@@ -282,7 +436,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	var users []User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.DisplayName, &u.Email, &u.AvatarPath, &u.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
 		}
 		users = append(users, u)
@@ -292,7 +446,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 
 func (s *Store) ListActiveSessions(ctx context.Context) ([]SessionInfo, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT u.username, s.created_at, s.expires_at
+		SELECT u.username, u.avatar_path, s.created_at, s.expires_at
 		FROM sessions s JOIN users u ON u.id = s.user_id
 		WHERE s.expires_at > NOW()
 		ORDER BY s.created_at DESC`)
@@ -303,7 +457,7 @@ func (s *Store) ListActiveSessions(ctx context.Context) ([]SessionInfo, error) {
 	var sessions []SessionInfo
 	for rows.Next() {
 		var si SessionInfo
-		if err := rows.Scan(&si.Username, &si.CreatedAt, &si.ExpiresAt); err != nil {
+		if err := rows.Scan(&si.Username, &si.AvatarPath, &si.CreatedAt, &si.ExpiresAt); err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
 		}
 		sessions = append(sessions, si)
@@ -514,6 +668,8 @@ func (s *Store) Settings(ctx context.Context) (Settings, error) {
 			out.Tagline = v
 		case "logo_path":
 			out.LogoPath = v
+		case "accent_color":
+			out.AccentColor = v
 		}
 	}
 	return out, rows.Err()

@@ -23,7 +23,7 @@ import (
 const maxUploadBytes = 5 << 20 // 5 MiB
 
 var allowedImageExt = map[string]bool{
-	".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true, ".svg": true,
+	".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true,
 }
 
 type deps struct {
@@ -55,6 +55,11 @@ func Register(mux *http.ServeMux, views *view.Views, st *store.Store, uploadDir 
 	mux.Handle("/logout", session(http.HandlerFunc(d.logout)))
 	mux.Handle("/c/", session(http.HandlerFunc(d.category)))
 	mux.Handle("/search", session(http.HandlerFunc(d.search)))
+	mux.Handle("/profile", requireUser(d.profile))
+	mux.Handle("/profile/password", requireUser(d.profilePassword))
+	mux.Handle("/profile/avatar-delete", requireUser(d.profileAvatarDelete))
+	mux.Handle("/profile/cover", requireUser(d.profileCover))
+	mux.Handle("/profile/cover-delete", requireUser(d.profileCoverDelete))
 
 	mux.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir(uploadDir))))
 
@@ -94,6 +99,171 @@ func (d *deps) home(w http.ResponseWriter, r *http.Request) {
 		GoVersion: runtime.Version()[2:],
 		Slides:    slides,
 	})
+}
+
+func (d *deps) profile(w http.ResponseWriter, r *http.Request) {
+	u, _ := middleware.UserFrom(r.Context())
+	page := view.Page{Title: "Profile", Active: "profile"}
+
+	if r.Method == http.MethodPost {
+		if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
+			page.Error = "Upload too large or malformed."
+		} else {
+			displayName := strings.TrimSpace(r.FormValue("display_name"))
+			email := strings.TrimSpace(r.FormValue("email"))
+			var avatarPath string
+			if file, header, err := r.FormFile("avatar"); err == nil && header.Size > 0 {
+				defer file.Close()
+				webPath, saveErr := d.saveUploadedImage(file, header.Filename, "avatars")
+				if saveErr != nil {
+					page.Error = saveErr.Error()
+				} else {
+					avatarPath = webPath
+				}
+			}
+			if page.Error == "" {
+				oldAvatar := u.AvatarPath
+				if err := d.store.UpdateProfile(r.Context(), u.ID, displayName, email, avatarPath); err != nil {
+					log.Printf("update profile: %v", err)
+					page.Error = "Could not save profile."
+				} else {
+					if avatarPath != "" && oldAvatar != "" && oldAvatar != avatarPath {
+						d.deleteUpload(oldAvatar)
+					}
+					http.Redirect(w, r, "/profile?saved=1", http.StatusSeeOther)
+					return
+				}
+			}
+		}
+	}
+
+	fresh, err := d.store.FindUser(r.Context(), u.ID)
+	if err != nil {
+		log.Printf("find user: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	page.User = &fresh
+	switch r.URL.Query().Get("saved") {
+	case "1":
+		page.Body = "Profile updated."
+	case "pwd":
+		page.Body = "Password changed."
+	case "cover":
+		page.Body = "Cover image updated."
+	}
+	switch r.URL.Query().Get("err") {
+	case "missing":
+		page.Error = "All password fields are required."
+	case "short":
+		page.Error = "New password must be at least 4 characters."
+	case "mismatch":
+		page.Error = "New password and confirmation do not match."
+	case "wrong":
+		page.Error = "Current password is incorrect."
+	case "internal":
+		page.Error = "Could not change password."
+	case "cover":
+		page.Error = "Could not save cover image."
+	}
+	d.render(w, r, "profile", page)
+}
+
+func (d *deps) profilePassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	u, _ := middleware.UserFrom(r.Context())
+	current := r.FormValue("current")
+	newPass := r.FormValue("new")
+	confirm := r.FormValue("confirm")
+
+	target := "/profile?saved=1"
+	switch {
+	case current == "" || newPass == "" || confirm == "":
+		target = "/profile?err=missing"
+	case len(newPass) < 4:
+		target = "/profile?err=short"
+	case newPass != confirm:
+		target = "/profile?err=mismatch"
+	default:
+		err := d.store.ChangePassword(r.Context(), u.ID, current, newPass)
+		switch {
+		case errors.Is(err, store.ErrInvalidCredentials):
+			target = "/profile?err=wrong"
+		case err != nil:
+			log.Printf("change password: %v", err)
+			target = "/profile?err=internal"
+		default:
+			target = "/profile?saved=pwd"
+		}
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
+}
+
+func (d *deps) profileCover(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	u, _ := middleware.UserFrom(r.Context())
+	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
+		http.Redirect(w, r, "/profile?err=cover", http.StatusSeeOther)
+		return
+	}
+	file, header, err := r.FormFile("cover")
+	if err != nil || header.Size == 0 {
+		http.Redirect(w, r, "/profile", http.StatusSeeOther)
+		return
+	}
+	defer file.Close()
+	webPath, saveErr := d.saveUploadedImage(file, header.Filename, "covers")
+	if saveErr != nil {
+		http.Redirect(w, r, "/profile?err=cover", http.StatusSeeOther)
+		return
+	}
+	old := u.CoverPath
+	if err := d.store.SetCover(r.Context(), u.ID, webPath); err != nil {
+		log.Printf("set cover: %v", err)
+		d.deleteUpload(webPath)
+		http.Redirect(w, r, "/profile?err=cover", http.StatusSeeOther)
+		return
+	}
+	if old != "" && old != webPath {
+		d.deleteUpload(old)
+	}
+	http.Redirect(w, r, "/profile?saved=cover", http.StatusSeeOther)
+}
+
+func (d *deps) profileCoverDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	u, _ := middleware.UserFrom(r.Context())
+	path, err := d.store.ClearCover(r.Context(), u.ID)
+	if err != nil {
+		log.Printf("clear cover: %v", err)
+	} else {
+		d.deleteUpload(path)
+	}
+	http.Redirect(w, r, "/profile?saved=1", http.StatusSeeOther)
+}
+
+func (d *deps) profileAvatarDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	u, _ := middleware.UserFrom(r.Context())
+	path, err := d.store.ClearAvatar(r.Context(), u.ID)
+	if err != nil {
+		log.Printf("clear avatar: %v", err)
+	} else {
+		d.deleteUpload(path)
+	}
+	http.Redirect(w, r, "/profile?saved=1", http.StatusSeeOther)
 }
 
 func (d *deps) search(w http.ResponseWriter, r *http.Request) {
@@ -323,11 +493,8 @@ func (d *deps) adminSlideDelete(w http.ResponseWriter, r *http.Request) {
 		imagePath, err := d.store.DeleteSlide(r.Context(), id)
 		if err != nil {
 			log.Printf("delete slide: %v", err)
-		} else if imagePath != "" {
-			// imagePath is "/uploads/<file>"; remove on-disk file.
-			if name := strings.TrimPrefix(imagePath, "/uploads/"); name != imagePath && name != "" {
-				_ = os.Remove(filepath.Join(d.uploadDir, name))
-			}
+		} else {
+			d.deleteUpload(imagePath)
 		}
 	}
 	http.Redirect(w, r, "/admin/slides", http.StatusSeeOther)
@@ -380,18 +547,29 @@ func (d *deps) adminBranding(w http.ResponseWriter, r *http.Request) {
 		} else {
 			siteName := strings.TrimSpace(r.FormValue("site_name"))
 			tagline := strings.TrimSpace(r.FormValue("tagline"))
+			accent := strings.TrimSpace(r.FormValue("accent_color"))
 			if siteName == "" {
 				page.Error = "Site name is required."
 			} else {
 				_ = d.store.SetSetting(r.Context(), "site_name", siteName)
 				_ = d.store.SetSetting(r.Context(), "tagline", tagline)
+				if validHexColor(accent) {
+					_ = d.store.SetSetting(r.Context(), "accent_color", accent)
+				} else if accent == "" {
+					_ = d.store.SetSetting(r.Context(), "accent_color", "")
+				}
 				if file, header, err := r.FormFile("logo"); err == nil && header.Size > 0 {
 					defer file.Close()
 					webPath, saveErr := d.saveUploadedImage(file, header.Filename, "branding")
 					if saveErr != nil {
 						page.Error = saveErr.Error()
 					} else {
-						_ = d.store.SetSetting(r.Context(), "logo_path", webPath)
+						old, _ := d.store.Settings(r.Context())
+						if err := d.store.SetSetting(r.Context(), "logo_path", webPath); err == nil {
+							if old.LogoPath != "" && old.LogoPath != webPath {
+								d.deleteUpload(old.LogoPath)
+							}
+						}
 					}
 				}
 				if page.Error == "" {
@@ -420,9 +598,7 @@ func (d *deps) adminLogoDelete(w http.ResponseWriter, r *http.Request) {
 	site, _ := d.store.Settings(r.Context())
 	if site.LogoPath != "" {
 		_ = d.store.SetSetting(r.Context(), "logo_path", "")
-		if name := strings.TrimPrefix(site.LogoPath, "/uploads/"); name != site.LogoPath && name != "" {
-			_ = os.Remove(filepath.Join(d.uploadDir, name))
-		}
+		d.deleteUpload(site.LogoPath)
 	}
 	http.Redirect(w, r, "/admin/branding", http.StatusSeeOther)
 }
@@ -459,6 +635,33 @@ func (d *deps) adminSlideReorder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func validHexColor(s string) bool {
+	if len(s) != 7 || s[0] != '#' {
+		return false
+	}
+	for _, r := range s[1:] {
+		switch {
+		case r >= '0' && r <= '9', r >= 'a' && r <= 'f', r >= 'A' && r <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func (d *deps) deleteUpload(webPath string) {
+	if webPath == "" {
+		return
+	}
+	rel := strings.TrimPrefix(webPath, "/uploads/")
+	if rel == webPath || rel == "" || strings.Contains(rel, "..") {
+		return
+	}
+	if err := os.Remove(filepath.Join(d.uploadDir, rel)); err != nil && !os.IsNotExist(err) {
+		log.Printf("delete upload %s: %v", webPath, err)
+	}
 }
 
 func (d *deps) saveUploadedImage(src io.Reader, originalName, subdir string) (string, error) {
