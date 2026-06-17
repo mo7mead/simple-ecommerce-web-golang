@@ -1,0 +1,14 @@
+/* Tailwind v4 — utilities only, skip preflight so MUI's CssBaseline stays authoritative. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+html, body, #root {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  box-sizing: border-box;
+}
+
+*, *::before, *::after { box-sizing: border-box; }

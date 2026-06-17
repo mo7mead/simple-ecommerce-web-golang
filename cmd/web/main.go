@@ -10,10 +10,9 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 
+	"smple-web-app/internal/api"
 	"smple-web-app/internal/config"
-	"smple-web-app/internal/handler"
 	"smple-web-app/internal/store"
-	"smple-web-app/internal/view"
 )
 
 func main() {
@@ -51,17 +50,13 @@ func main() {
 
 	go purgeLoop(st)
 
-	views, err := view.Load()
-	if err != nil {
-		log.Fatalf("load views: %v", err)
-	}
-
 	if err := os.MkdirAll(cfg.UploadDir, 0o755); err != nil {
 		log.Fatalf("create upload dir: %v", err)
 	}
 
 	mux := http.NewServeMux()
-	handler.Register(mux, views, st, cfg.UploadDir)
+	api.Register(mux, st, cfg.UploadDir)
+	mux.Handle("/", spaHandler("frontend/dist"))
 
 	srv := &http.Server{
 		Addr:              cfg.AppAddr,
@@ -70,6 +65,18 @@ func main() {
 	}
 	log.Printf("Server listening on http://localhost%s", cfg.AppAddr)
 	log.Fatal(srv.ListenAndServe())
+}
+
+func spaHandler(dir string) http.Handler {
+	fs := http.FileServer(http.Dir(dir))
+	indexPath := dir + "/index.html"
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := os.Stat(dir + r.URL.Path); err == nil && r.URL.Path != "/" {
+			fs.ServeHTTP(w, r)
+			return
+		}
+		http.ServeFile(w, r, indexPath)
+	})
 }
 
 func purgeLoop(st *store.Store) {

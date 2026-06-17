@@ -85,14 +85,57 @@ type Slide struct {
 	CreatedAt time.Time
 }
 
-type Product struct {
+type Brand struct {
 	ID        int64
-	SellerID  int64
 	Name      string
-	Price     float64
-	Stock     int
+	Slug      string
+	LogoPath  string
+	Website   string
+	Position  int
 	CreatedAt time.Time
 }
+
+type FlashSale struct {
+	ID            int64
+	ProductID     sql.NullInt64
+	ProductName   string
+	ProductSKU    string
+	Title         string
+	ImagePath     string
+	OriginalPrice float64
+	SalePrice     float64
+	Stock         int
+	Sold          int
+	EndsAt        time.Time
+	Position      int
+	CreatedAt     time.Time
+}
+
+type Product struct {
+	ID             int64
+	SellerID       int64
+	SellerUsername string
+	SKU            string
+	Name           string
+	Description    string
+	ImagePath      string
+	Price          float64
+	Stock          int
+	ShippingDays   int
+	CategoryID     sql.NullInt64
+	CategoryName   string
+	BrandID        sql.NullInt64
+	BrandName      string
+	Status         string
+	ReviewNote     string
+	CreatedAt      time.Time
+}
+
+const (
+	ProductPending  = "pending"
+	ProductApproved = "approved"
+	ProductRejected = "rejected"
+)
 
 type SellerStats struct {
 	TotalProducts  int
@@ -155,15 +198,55 @@ func (s *Store) Migrate(ctx context.Context) error {
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			INDEX idx_slides_position (position)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+		`CREATE TABLE IF NOT EXISTS brands (
+			id INT AUTO_INCREMENT PRIMARY KEY,
+			name VARCHAR(120) NOT NULL,
+			slug VARCHAR(160) NOT NULL,
+			logo_path VARCHAR(255) NOT NULL DEFAULT '',
+			website VARCHAR(255) NOT NULL DEFAULT '',
+			position INT NOT NULL DEFAULT 0,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE KEY uniq_brand_slug (slug),
+			INDEX idx_brand_position (position)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+		`CREATE TABLE IF NOT EXISTS flash_sales (
+			id INT AUTO_INCREMENT PRIMARY KEY,
+			product_id INT NULL,
+			title VARCHAR(160) NOT NULL,
+			image_path VARCHAR(255) NOT NULL,
+			original_price DECIMAL(10,2) NOT NULL DEFAULT 0,
+			sale_price DECIMAL(10,2) NOT NULL DEFAULT 0,
+			stock INT NOT NULL DEFAULT 0,
+			sold INT NOT NULL DEFAULT 0,
+			ends_at DATETIME NOT NULL,
+			position INT NOT NULL DEFAULT 0,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL,
+			INDEX idx_flash_ends (ends_at),
+			INDEX idx_flash_position (position),
+			INDEX idx_flash_product (product_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 		`CREATE TABLE IF NOT EXISTS products (
 			id INT AUTO_INCREMENT PRIMARY KEY,
 			seller_id INT NOT NULL,
+			sku VARCHAR(32) NOT NULL DEFAULT '',
 			name VARCHAR(128) NOT NULL,
+			description TEXT NOT NULL,
+			image_path VARCHAR(255) NOT NULL DEFAULT '',
 			price DECIMAL(10,2) NOT NULL DEFAULT 0,
 			stock INT NOT NULL DEFAULT 0,
+			shipping_days INT NOT NULL DEFAULT 0,
+			category_id INT NULL,
+			brand_id INT NULL,
+			status VARCHAR(16) NOT NULL DEFAULT 'approved',
+			review_note VARCHAR(500) NOT NULL DEFAULT '',
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY (seller_id) REFERENCES users(id) ON DELETE CASCADE,
-			INDEX idx_seller (seller_id)
+			FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL,
+			FOREIGN KEY (brand_id) REFERENCES brands(id) ON DELETE SET NULL,
+			UNIQUE KEY uniq_product_sku (sku),
+			INDEX idx_seller (seller_id),
+			INDEX idx_product_status (status)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 	}
 	for _, q := range stmts {
@@ -186,6 +269,34 @@ func (s *Store) Migrate(ctx context.Context) error {
 	_, _ = s.db.ExecContext(ctx,
 		`ALTER TABLE slides ADD COLUMN position INT NOT NULL DEFAULT 0`)
 	_, _ = s.db.ExecContext(ctx, `UPDATE slides SET position = id WHERE position = 0`)
+
+	// Backfill product columns added in the seller-approval feature.
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE products ADD COLUMN sku VARCHAR(32) NOT NULL DEFAULT ''`)
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE products ADD COLUMN description TEXT NOT NULL`)
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE products ADD COLUMN image_path VARCHAR(255) NOT NULL DEFAULT ''`)
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE products ADD COLUMN shipping_days INT NOT NULL DEFAULT 0`)
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE products ADD COLUMN category_id INT NULL`)
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE products ADD COLUMN brand_id INT NULL`)
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE products ADD COLUMN status VARCHAR(16) NOT NULL DEFAULT 'approved'`)
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE products ADD COLUMN review_note VARCHAR(500) NOT NULL DEFAULT ''`)
+	// Flash sales: link to a product when admin selects one.
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE flash_sales ADD COLUMN product_id INT NULL`)
+
+	// Existing rows with empty SKU get a generated one.
+	if rows, err := s.db.QueryContext(ctx, `SELECT id FROM products WHERE sku = ''`); err == nil {
+		var ids []int64
+		for rows.Next() {
+			var id int64
+			if rows.Scan(&id) == nil {
+				ids = append(ids, id)
+			}
+		}
+		rows.Close()
+		for _, id := range ids {
+			sku, _ := s.uniqueSKU(ctx)
+			_, _ = s.db.ExecContext(ctx, `UPDATE products SET sku = ? WHERE id = ?`, sku, id)
+		}
+	}
 	return nil
 }
 
@@ -470,36 +581,155 @@ func (s *Store) PurgeExpiredSessions(ctx context.Context) error {
 	return err
 }
 
+const productSelect = `SELECT p.id, p.seller_id, u.username, p.sku, p.name, p.description, p.image_path,
+		p.price, p.stock, p.shipping_days, p.category_id, COALESCE(c.name,''),
+		p.brand_id, COALESCE(b.name,''),
+		p.status, p.review_note, p.created_at
+	FROM products p
+	JOIN users u ON u.id = p.seller_id
+	LEFT JOIN categories c ON c.id = p.category_id
+	LEFT JOIN brands b ON b.id = p.brand_id`
+
+func scanProductRows(rows *sql.Rows) ([]Product, error) {
+	var out []Product
+	for rows.Next() {
+		var p Product
+		if err := rows.Scan(&p.ID, &p.SellerID, &p.SellerUsername, &p.SKU, &p.Name, &p.Description, &p.ImagePath,
+			&p.Price, &p.Stock, &p.ShippingDays, &p.CategoryID, &p.CategoryName,
+			&p.BrandID, &p.BrandName, &p.Status, &p.ReviewNote, &p.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// ListProducts returns the seller's own catalog (all statuses).
 func (s *Store) ListProducts(ctx context.Context, sellerID int64) ([]Product, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, seller_id, name, price, stock, created_at FROM products WHERE seller_id = ? ORDER BY id DESC`,
-		sellerID)
+	rows, err := s.db.QueryContext(ctx, productSelect+` WHERE p.seller_id = ? ORDER BY p.id DESC`, sellerID)
 	if err != nil {
 		return nil, fmt.Errorf("query: %w", err)
 	}
 	defer rows.Close()
-	var products []Product
-	for rows.Next() {
-		var p Product
-		if err := rows.Scan(&p.ID, &p.SellerID, &p.Name, &p.Price, &p.Stock, &p.CreatedAt); err != nil {
-			return nil, fmt.Errorf("scan: %w", err)
-		}
-		products = append(products, p)
-	}
-	return products, rows.Err()
+	return scanProductRows(rows)
 }
 
-func (s *Store) CreateProduct(ctx context.Context, sellerID int64, name string, price float64, stock int) error {
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO products (seller_id, name, price, stock) VALUES (?, ?, ?, ?)`,
-		sellerID, name, price, stock)
-	return err
+// ListProductsByStatus lists every product matching the given status (admin queue).
+// Pass empty string for "all".
+func (s *Store) ListProductsByStatus(ctx context.Context, status string) ([]Product, error) {
+	q := productSelect
+	args := []any{}
+	if status != "" {
+		q += ` WHERE p.status = ?`
+		args = append(args, status)
+	}
+	q += ` ORDER BY p.created_at DESC, p.id DESC`
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query: %w", err)
+	}
+	defer rows.Close()
+	return scanProductRows(rows)
+}
+
+var skuAlphabet = []byte("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
+
+func generateSKU() (string, error) {
+	buf := make([]byte, 8)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	for i, b := range buf {
+		buf[i] = skuAlphabet[int(b)%len(skuAlphabet)]
+	}
+	return "Z1-" + string(buf), nil
+}
+
+func (s *Store) uniqueSKU(ctx context.Context) (string, error) {
+	for i := 0; i < 8; i++ {
+		sku, err := generateSKU()
+		if err != nil {
+			return "", err
+		}
+		var exists int
+		err = s.db.QueryRowContext(ctx, `SELECT 1 FROM products WHERE sku = ?`, sku).Scan(&exists)
+		if errors.Is(err, sql.ErrNoRows) {
+			return sku, nil
+		}
+		if err != nil {
+			return "", fmt.Errorf("sku lookup: %w", err)
+		}
+	}
+	return "", fmt.Errorf("could not generate unique SKU")
+}
+
+type CreateProductInput struct {
+	Name          string
+	Description   string
+	ImagePath     string
+	Price         float64
+	Stock         int
+	ShippingDays  int
+	CategoryID    *int64
+	BrandID       *int64
+	AutoApprove   bool
+}
+
+// CreateProduct creates a product with an auto-generated SKU. Status defaults
+// to "pending" unless AutoApprove is set (admin-created products).
+func (s *Store) CreateProduct(ctx context.Context, sellerID int64, in CreateProductInput) (string, error) {
+	sku, err := s.uniqueSKU(ctx)
+	if err != nil {
+		return "", err
+	}
+	status := ProductPending
+	if in.AutoApprove {
+		status = ProductApproved
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO products (seller_id, sku, name, description, image_path, price, stock,
+			shipping_days, category_id, brand_id, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		sellerID, sku, in.Name, in.Description, in.ImagePath, in.Price, in.Stock,
+		in.ShippingDays, in.CategoryID, in.BrandID, status)
+	if err != nil {
+		return "", fmt.Errorf("insert: %w", err)
+	}
+	return sku, nil
 }
 
 func (s *Store) DeleteProduct(ctx context.Context, sellerID, productID int64) error {
 	_, err := s.db.ExecContext(ctx,
 		`DELETE FROM products WHERE id = ? AND seller_id = ?`, productID, sellerID)
 	return err
+}
+
+func (s *Store) ApproveProduct(ctx context.Context, productID int64) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE products SET status = ?, review_note = '' WHERE id = ? AND status = ?`,
+		ProductApproved, productID, ProductPending)
+	if err != nil {
+		return fmt.Errorf("approve: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) RejectProduct(ctx context.Context, productID int64, note string) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE products SET status = ?, review_note = ? WHERE id = ? AND status = ?`,
+		ProductRejected, note, productID, ProductPending)
+	if err != nil {
+		return fmt.Errorf("reject: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func Slugify(s string) string {
@@ -801,6 +1031,117 @@ func (s *Store) DeleteSlide(ctx context.Context, id int64) (string, error) {
 		return "", fmt.Errorf("lookup: %w", err)
 	}
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM slides WHERE id = ?`, id); err != nil {
+		return "", fmt.Errorf("delete: %w", err)
+	}
+	return imagePath, nil
+}
+
+func (s *Store) ListBrands(ctx context.Context) ([]Brand, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, name, slug, logo_path, website, position, created_at
+		 FROM brands ORDER BY position, id`)
+	if err != nil {
+		return nil, fmt.Errorf("query: %w", err)
+	}
+	defer rows.Close()
+	var out []Brand
+	for rows.Next() {
+		var b Brand
+		if err := rows.Scan(&b.ID, &b.Name, &b.Slug, &b.LogoPath, &b.Website, &b.Position, &b.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan: %w", err)
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) CreateBrand(ctx context.Context, name, logoPath, website string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("name is required")
+	}
+	base := Slugify(name)
+	slug := base
+	for n := 2; ; n++ {
+		var exists int
+		err := s.db.QueryRowContext(ctx, `SELECT 1 FROM brands WHERE slug = ?`, slug).Scan(&exists)
+		if errors.Is(err, sql.ErrNoRows) {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("slug check: %w", err)
+		}
+		slug = fmt.Sprintf("%s-%d", base, n)
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO brands (name, slug, logo_path, website, position)
+		 VALUES (?, ?, ?, ?, COALESCE((SELECT next_pos FROM (SELECT MAX(position) + 1 AS next_pos FROM brands) t), 1))`,
+		name, slug, logoPath, website)
+	return err
+}
+
+func (s *Store) DeleteBrand(ctx context.Context, id int64) (string, error) {
+	var logoPath string
+	err := s.db.QueryRowContext(ctx, `SELECT logo_path FROM brands WHERE id = ?`, id).Scan(&logoPath)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("lookup: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM brands WHERE id = ?`, id); err != nil {
+		return "", fmt.Errorf("delete: %w", err)
+	}
+	return logoPath, nil
+}
+
+func (s *Store) ListFlashSales(ctx context.Context, activeOnly bool) ([]FlashSale, error) {
+	q := `SELECT f.id, f.product_id, COALESCE(p.name,''), COALESCE(p.sku,''),
+		         f.title, f.image_path, f.original_price, f.sale_price,
+		         f.stock, f.sold, f.ends_at, f.position, f.created_at
+	      FROM flash_sales f
+	      LEFT JOIN products p ON p.id = f.product_id`
+	if activeOnly {
+		q += ` WHERE f.ends_at > NOW() AND f.stock > f.sold`
+	}
+	q += ` ORDER BY f.position, f.ends_at, f.id`
+	rows, err := s.db.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("query: %w", err)
+	}
+	defer rows.Close()
+	var out []FlashSale
+	for rows.Next() {
+		var f FlashSale
+		if err := rows.Scan(&f.ID, &f.ProductID, &f.ProductName, &f.ProductSKU,
+			&f.Title, &f.ImagePath, &f.OriginalPrice, &f.SalePrice,
+			&f.Stock, &f.Sold, &f.EndsAt, &f.Position, &f.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan: %w", err)
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) CreateFlashSale(ctx context.Context, productID *int64, title, imagePath string,
+	originalPrice, salePrice float64, stock int, endsAt time.Time) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO flash_sales (product_id, title, image_path, original_price, sale_price, stock, ends_at, position)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT next_pos FROM (SELECT MAX(position) + 1 AS next_pos FROM flash_sales) t), 1))`,
+		productID, title, imagePath, originalPrice, salePrice, stock, endsAt)
+	return err
+}
+
+func (s *Store) DeleteFlashSale(ctx context.Context, id int64) (string, error) {
+	var imagePath string
+	err := s.db.QueryRowContext(ctx, `SELECT image_path FROM flash_sales WHERE id = ?`, id).Scan(&imagePath)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("lookup: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM flash_sales WHERE id = ?`, id); err != nil {
 		return "", fmt.Errorf("delete: %w", err)
 	}
 	return imagePath, nil
