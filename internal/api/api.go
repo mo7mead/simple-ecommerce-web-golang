@@ -44,7 +44,11 @@ func Register(mux *http.ServeMux, st *store.Store, uploadDir string) {
 	mux.Handle("/api/slides", session(http.HandlerFunc(a.slides)))
 	mux.Handle("/api/flash-sales", session(http.HandlerFunc(a.flashSales)))
 	mux.Handle("/api/brands", session(http.HandlerFunc(a.brands)))
+	mux.Handle("/api/products", session(http.HandlerFunc(a.publicProducts)))
 	mux.Handle("/api/search", session(http.HandlerFunc(a.search)))
+
+	mux.Handle("/api/orders", auth(a.userOrders))
+	mux.Handle("/api/orders/create", auth(a.orderCreate))
 
 	mux.Handle("/api/profile", auth(a.profileGet))
 	mux.Handle("/api/profile/update", auth(a.profileUpdate))
@@ -84,6 +88,15 @@ func Register(mux *http.ServeMux, st *store.Store, uploadDir string) {
 	mux.Handle("/api/admin/products", adminOnly(a.adminProducts))
 	mux.Handle("/api/admin/products/approve", adminOnly(a.adminProductApprove))
 	mux.Handle("/api/admin/products/reject", adminOnly(a.adminProductReject))
+	mux.Handle("/api/admin/products/status", adminOnly(a.adminProductSetStatus))
+	mux.Handle("/api/admin/products/bulk-status", adminOnly(a.adminProductBulkStatus))
+	mux.Handle("/api/admin/notifications", adminOnly(a.adminNotifications))
+	mux.Handle("/api/admin/notifications/read", adminOnly(a.adminNotificationsRead))
+	mux.Handle("/api/admin/notifications/stream", adminOnly(a.adminNotificationsStream))
+	mux.Handle("/api/admin/payments", adminOnly(a.adminPayments))
+	mux.Handle("/api/admin/orders", adminOnly(a.adminOrders))
+	mux.Handle("/api/admin/orders/status", adminOnly(a.adminOrderStatus))
+	mux.Handle("GET /api/admin/order/{ref}", adminOnly(a.adminOrderByRef))
 
 	mux.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir(uploadDir))))
 }
@@ -223,6 +236,9 @@ func (a *API) settings(w http.ResponseWriter, r *http.Request) {
 		"tagline":     s.Tagline,
 		"logoPath":    s.LogoPath,
 		"accentColor": s.AccentColor,
+		"codEnabled":  s.CodEnabled,
+		"codFee":      s.CodFee,
+		"shippingFee": s.ShippingFee,
 	})
 }
 
@@ -538,6 +554,23 @@ func (a *API) adminBrandDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	a.deleteUpload(path)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (a *API) publicProducts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	products, err := a.Store.ListProductsByStatus(r.Context(), store.ProductApproved)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	out := make([]productDTO, 0, len(products))
+	for _, p := range products {
+		out = append(out, toProductDTO(p))
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (a *API) search(w http.ResponseWriter, r *http.Request) {
@@ -1185,6 +1218,172 @@ func (a *API) adminProductReject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+func (a *API) adminProductSetStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var body struct {
+		ID     int64  `json:"id"`
+		Status string `json:"status"`
+		Note   string `json:"note"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	if err := a.Store.SetProductStatus(r.Context(), body.ID, strings.TrimSpace(body.Status), strings.TrimSpace(body.Note)); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (a *API) adminProductBulkStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var body struct {
+		IDs    []int64 `json:"ids"`
+		Status string  `json:"status"`
+		Note   string  `json:"note"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	if len(body.IDs) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no ids"})
+		return
+	}
+	if len(body.IDs) > 500 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "too many ids"})
+		return
+	}
+	changed, err := a.Store.BulkSetProductStatus(r.Context(), body.IDs, strings.TrimSpace(body.Status), strings.TrimSpace(body.Note))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "changed": changed})
+}
+
+type notificationDTO struct {
+	ID        int64     `json:"id"`
+	Kind      string    `json:"kind"`
+	Title     string    `json:"title"`
+	Body      string    `json:"body"`
+	Link      string    `json:"link"`
+	RelatedID *int64    `json:"relatedId"`
+	ReadAt    *time.Time `json:"readAt"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+func toNotificationDTO(n store.Notification) notificationDTO {
+	dto := notificationDTO{
+		ID: n.ID, Kind: n.Kind, Title: n.Title, Body: n.Body, Link: n.Link,
+		CreatedAt: n.CreatedAt,
+	}
+	if n.RelatedID.Valid {
+		v := n.RelatedID.Int64
+		dto.RelatedID = &v
+	}
+	if n.ReadAt.Valid {
+		v := n.ReadAt.Time
+		dto.ReadAt = &v
+	}
+	return dto
+}
+
+func (a *API) adminNotifications(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	notifs, unread, err := a.Store.ListNotifications(r.Context(), "admin", limit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	out := make([]notificationDTO, 0, len(notifs))
+	for _, n := range notifs {
+		out = append(out, toNotificationDTO(n))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": out, "unread": unread})
+}
+
+func (a *API) adminNotificationsStream(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "streaming unsupported"})
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	ch, cancel := a.Store.SubscribeNotifications("admin", 32)
+	defer cancel()
+
+	// Initial comment so the client knows the stream is live.
+	if _, err := fmt.Fprintf(w, ": connected\n\n"); err != nil {
+		return
+	}
+	flusher.Flush()
+
+	heartbeat := time.NewTicker(25 * time.Second)
+	defer heartbeat.Stop()
+
+	ctx := r.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-heartbeat.C:
+			if _, err := fmt.Fprintf(w, ": ping\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		case n, ok := <-ch:
+			if !ok {
+				return
+			}
+			data, err := json.Marshal(toNotificationDTO(n))
+			if err != nil {
+				continue
+			}
+			if _, err := fmt.Fprintf(w, "event: notification\ndata: %s\n\n", data); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
+func (a *API) adminNotificationsRead(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var body struct {
+		IDs []int64 `json:"ids"`
+	}
+	_ = readJSON(r, &body)
+	n, err := a.Store.MarkNotificationsRead(r.Context(), "admin", body.IDs)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "marked": n})
+}
+
 func (a *API) sellerProductDelete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
@@ -1232,6 +1431,273 @@ func (a *API) profilePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// ---- Payments (admin) ----
+
+func (a *API) adminPayments(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		s, _ := a.Store.Settings(r.Context())
+		writeJSON(w, http.StatusOK, map[string]any{
+			"codEnabled":  s.CodEnabled,
+			"codFee":      s.CodFee,
+			"shippingFee": s.ShippingFee,
+		})
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var body struct {
+		CodEnabled  bool    `json:"codEnabled"`
+		CodFee      float64 `json:"codFee"`
+		ShippingFee float64 `json:"shippingFee"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	if body.CodFee < 0 || body.ShippingFee < 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "fees must be non-negative"})
+		return
+	}
+	codFlag := "1"
+	if !body.CodEnabled {
+		codFlag = "0"
+	}
+	_ = a.Store.SetSetting(r.Context(), "cod_enabled", codFlag)
+	_ = a.Store.SetSetting(r.Context(), "cod_fee", strconv.FormatFloat(body.CodFee, 'f', 2, 64))
+	_ = a.Store.SetSetting(r.Context(), "shipping_fee", strconv.FormatFloat(body.ShippingFee, 'f', 2, 64))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"codEnabled":  body.CodEnabled,
+		"codFee":      body.CodFee,
+		"shippingFee": body.ShippingFee,
+	})
+}
+
+// ---- Orders ----
+
+type orderItemDTO struct {
+	ProductID int64   `json:"productId"`
+	Name      string  `json:"name"`
+	Price     float64 `json:"price"`
+	Qty       int     `json:"qty"`
+	ImagePath string  `json:"imagePath"`
+}
+
+type orderDTO struct {
+	ID            int64          `json:"id"`
+	Ref           string         `json:"ref"`
+	UserID        int64          `json:"userId"`
+	Username      string         `json:"username"`
+	CustomerName  string         `json:"customerName"`
+	Phone         string         `json:"phone"`
+	Address       string         `json:"address"`
+	Items         []orderItemDTO `json:"items"`
+	Subtotal      float64        `json:"subtotal"`
+	ShippingFee   float64        `json:"shippingFee"`
+	CodFee        float64        `json:"codFee"`
+	Total         float64        `json:"total"`
+	PaymentMethod string         `json:"paymentMethod"`
+	Status        string         `json:"status"`
+	CreatedAt     time.Time      `json:"createdAt"`
+}
+
+func toOrderDTO(o store.Order) orderDTO {
+	items := make([]orderItemDTO, 0, len(o.Items))
+	for _, it := range o.Items {
+		items = append(items, orderItemDTO{
+			ProductID: it.ProductID, Name: it.Name, Price: it.Price,
+			Qty: it.Qty, ImagePath: it.ImagePath,
+		})
+	}
+	return orderDTO{
+		ID: o.ID, Ref: o.Ref, UserID: o.UserID, Username: o.Username,
+		CustomerName: o.CustomerName, Phone: o.Phone, Address: o.Address,
+		Items:    items,
+		Subtotal: o.Subtotal, ShippingFee: o.ShippingFee, CodFee: o.CodFee, Total: o.Total,
+		PaymentMethod: o.PaymentMethod, Status: o.Status, CreatedAt: o.CreatedAt,
+	}
+}
+
+func (a *API) userOrders(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	u, _ := middleware.UserFrom(r.Context())
+	orders, err := a.Store.ListUserOrders(r.Context(), u.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	out := make([]orderDTO, 0, len(orders))
+	for _, o := range orders {
+		out = append(out, toOrderDTO(o))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (a *API) orderCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	u, _ := middleware.UserFrom(r.Context())
+	var body struct {
+		CustomerName  string `json:"customerName"`
+		Phone         string `json:"phone"`
+		Address       string `json:"address"`
+		PaymentMethod string `json:"paymentMethod"`
+		Items         []struct {
+			ProductID int64 `json:"productId"`
+			Qty       int   `json:"qty"`
+		} `json:"items"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	body.CustomerName = strings.TrimSpace(body.CustomerName)
+	body.Phone = strings.TrimSpace(body.Phone)
+	body.Address = strings.TrimSpace(body.Address)
+	body.PaymentMethod = strings.TrimSpace(body.PaymentMethod)
+	if body.CustomerName == "" || body.Phone == "" || body.Address == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name, phone, and address required"})
+		return
+	}
+	if body.PaymentMethod == "" {
+		body.PaymentMethod = "cod"
+	}
+	if len(body.Items) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cart is empty"})
+		return
+	}
+
+	settings, err := a.Store.Settings(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	if body.PaymentMethod == "cod" && !settings.CodEnabled {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cash on delivery is disabled"})
+		return
+	}
+
+	// Resolve products fresh from DB; never trust client prices/stock.
+	allApproved, err := a.Store.ListProductsByStatus(r.Context(), store.ProductApproved)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	byID := make(map[int64]store.Product, len(allApproved))
+	for _, p := range allApproved {
+		byID[p.ID] = p
+	}
+	resolved := make([]store.OrderItem, 0, len(body.Items))
+	var subtotal float64
+	for _, it := range body.Items {
+		p, ok := byID[it.ProductID]
+		if !ok {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("product %d unavailable", it.ProductID)})
+			return
+		}
+		if it.Qty <= 0 || it.Qty > p.Stock {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("invalid quantity for %s", p.Name)})
+			return
+		}
+		resolved = append(resolved, store.OrderItem{
+			ProductID: p.ID, Name: p.Name, Price: p.Price, Qty: it.Qty, ImagePath: p.ImagePath,
+		})
+		subtotal += p.Price * float64(it.Qty)
+	}
+	codFee := 0.0
+	if body.PaymentMethod == "cod" {
+		codFee = settings.CodFee
+	}
+	total := subtotal + settings.ShippingFee + codFee
+
+	id, ref, err := a.Store.CreateOrder(r.Context(), store.CreateOrderInput{
+		UserID:        u.ID,
+		CustomerName:  body.CustomerName,
+		Phone:         body.Phone,
+		Address:       body.Address,
+		Items:         resolved,
+		Subtotal:      subtotal,
+		ShippingFee:   settings.ShippingFee,
+		CodFee:        codFee,
+		Total:         total,
+		PaymentMethod: body.PaymentMethod,
+	})
+	if err != nil {
+		log.Printf("create order: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "id": id, "ref": ref, "subtotal": subtotal,
+		"shippingFee": settings.ShippingFee, "codFee": codFee, "total": total,
+	})
+}
+
+func (a *API) adminOrderByRef(w http.ResponseWriter, r *http.Request) {
+	ref := strings.TrimSpace(r.PathValue("ref"))
+	if ref == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "ref required"})
+		return
+	}
+	o, err := a.Store.FindOrderByRef(r.Context(), ref)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, toOrderDTO(o))
+}
+
+func (a *API) adminOrders(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	orders, err := a.Store.ListAllOrders(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	out := make([]orderDTO, 0, len(orders))
+	for _, o := range orders {
+		out = append(out, toOrderDTO(o))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (a *API) adminOrderStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var body struct {
+		ID     int64  `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	if err := a.Store.SetOrderStatus(r.Context(), body.ID, strings.TrimSpace(body.Status)); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})

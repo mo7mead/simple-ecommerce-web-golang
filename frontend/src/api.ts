@@ -14,6 +14,41 @@ export interface SiteSettings {
   tagline: string
   logoPath: string
   accentColor: string
+  codEnabled: boolean
+  codFee: number
+  shippingFee: number
+}
+
+export interface OrderItem {
+  productId: number
+  name: string
+  price: number
+  qty: number
+  imagePath: string
+}
+
+export interface Order {
+  id: number
+  ref: string
+  userId: number
+  username: string
+  customerName: string
+  phone: string
+  address: string
+  items: OrderItem[]
+  subtotal: number
+  shippingFee: number
+  codFee: number
+  total: number
+  paymentMethod: string
+  status: 'pending' | 'shipped' | 'delivered' | 'cancelled'
+  createdAt: string
+}
+
+export interface PaymentsConfig {
+  codEnabled: boolean
+  codFee: number
+  shippingFee: number
 }
 
 export interface Category {
@@ -37,6 +72,9 @@ export interface Brand {
 
 export interface FlashSale {
   id: number
+  productId: number | null
+  productName: string
+  productSku: string
   title: string
   imagePath: string
   originalPrice: number
@@ -146,7 +184,7 @@ export const api = {
   adminFlashSales: () => request<FlashSale[] | null>('/api/admin/flash-sales'),
   adminFlashSaleCreate: (form: {
     title: string; originalPrice: number; salePrice: number;
-    stock: number; endsAt: string; image: File
+    stock: number; endsAt: string; image?: File | null; productId?: number | null
   }) => {
     const fd = new FormData()
     fd.append('title', form.title)
@@ -154,7 +192,8 @@ export const api = {
     fd.append('salePrice', String(form.salePrice))
     fd.append('stock', String(form.stock))
     fd.append('endsAt', form.endsAt)
-    fd.append('image', form.image)
+    if (form.productId) fd.append('productId', String(form.productId))
+    if (form.image) fd.append('image', form.image)
     return upload<{ ok: boolean }>('/api/admin/flash-sales', fd)
   },
   adminFlashSaleDelete: (id: number) =>
@@ -196,6 +235,8 @@ export const api = {
   },
   deleteCover: () => request<User>('/api/profile/cover-delete', { method: 'POST' }),
 
+  products: () => request<Product[] | null>('/api/products'),
+
   sellerStats: () => request<{ TotalProducts: number; TotalStock: number; InventoryValue: number; RecentProducts: any[] }>('/api/seller/stats'),
   sellerProducts: () => request<Product[] | null>('/api/seller/products'),
   sellerProductCreate: (form: {
@@ -227,6 +268,53 @@ export const api = {
     request<{ ok: boolean }>('/api/admin/products/reject', {
       method: 'POST', body: JSON.stringify({ id, note }),
     }),
+  adminProductSetStatus: (id: number, status: 'pending' | 'approved' | 'rejected', note?: string) =>
+    request<{ ok: boolean }>('/api/admin/products/status', {
+      method: 'POST', body: JSON.stringify({ id, status, note: note || '' }),
+    }),
+  adminProductBulkStatus: (ids: number[], status: 'pending' | 'approved' | 'rejected', note?: string) =>
+    request<{ ok: boolean; changed: number }>('/api/admin/products/bulk-status', {
+      method: 'POST', body: JSON.stringify({ ids, status, note: note || '' }),
+    }),
+
+  adminPaymentsGet: () => request<PaymentsConfig>('/api/admin/payments'),
+  adminPaymentsSave: (cfg: PaymentsConfig) =>
+    request<PaymentsConfig>('/api/admin/payments', {
+      method: 'POST', body: JSON.stringify(cfg),
+    }),
+  adminOrders: () => request<Order[] | null>('/api/admin/orders'),
+  adminOrder: (ref: string) =>
+    request<Order>(`/api/admin/order/${encodeURIComponent(ref)}`),
+  adminOrderStatus: (id: number, status: Order['status']) =>
+    request<{ ok: boolean }>('/api/admin/orders/status', {
+      method: 'POST', body: JSON.stringify({ id, status }),
+    }),
+  myOrders: () => request<Order[] | null>('/api/orders'),
+  createOrder: (body: {
+    customerName: string; phone: string; address: string;
+    paymentMethod: string;
+    items: { productId: number; qty: number }[];
+  }) =>
+    request<{ ok: boolean; id: number; ref: string; subtotal: number; shippingFee: number; codFee: number; total: number }>(
+      '/api/orders/create', { method: 'POST', body: JSON.stringify(body) }),
+
+  adminNotifications: (limit = 25) =>
+    request<{ items: AdminNotification[]; unread: number }>(`/api/admin/notifications?limit=${limit}`),
+  adminNotificationsRead: (ids?: number[]) =>
+    request<{ ok: boolean; marked: number }>('/api/admin/notifications/read', {
+      method: 'POST', body: JSON.stringify({ ids: ids || [] }),
+    }),
+}
+
+export interface AdminNotification {
+  id: number
+  kind: string
+  title: string
+  body: string
+  link: string
+  relatedId: number | null
+  readAt: string | null
+  createdAt: string
 }
 
 export interface Product {

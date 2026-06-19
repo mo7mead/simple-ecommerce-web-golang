@@ -1,5 +1,7 @@
 import {
   Box, AppBar, Toolbar, Typography, Avatar, IconButton, Tooltip, useTheme,
+  InputBase, Menu, MenuItem, ListItemIcon, ListItemText, Divider, Chip,
+  ClickAwayListener, Paper, Stack,
 } from '@mui/material'
 import DashboardOutlinedIcon from '@mui/icons-material/DashboardOutlined'
 import CollectionsOutlinedIcon from '@mui/icons-material/CollectionsOutlined'
@@ -12,12 +14,24 @@ import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined'
 import BoltOutlinedIcon from '@mui/icons-material/BoltOutlined'
 import StorefrontOutlinedIcon from '@mui/icons-material/StorefrontOutlined'
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined'
+import ReceiptLongOutlinedIcon from '@mui/icons-material/ReceiptLongOutlined'
+import PaymentsOutlinedIcon from '@mui/icons-material/PaymentsOutlined'
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
+import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined'
 import NotificationsNoneOutlinedIcon from '@mui/icons-material/NotificationsNoneOutlined'
-import { cloneElement, useCallback, useEffect, useState, type ReactElement, type ReactNode } from 'react'
+import SearchIcon from '@mui/icons-material/Search'
+import PersonOutlineOutlinedIcon from '@mui/icons-material/PersonOutlineOutlined'
+import OpenInNewIcon from '@mui/icons-material/OpenInNew'
+import RefreshOutlinedIcon from '@mui/icons-material/RefreshOutlined'
+import { cloneElement, useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from './AuthContext'
+import { api, type AdminNotification } from './api'
+import CircleIcon from '@mui/icons-material/Circle'
+import VolumeUpOutlinedIcon from '@mui/icons-material/VolumeUpOutlined'
+import VolumeOffOutlinedIcon from '@mui/icons-material/VolumeOffOutlined'
+import { playNotifSound } from './notifySound'
 
 const FULL = 252
 const MINI = 68
@@ -48,10 +62,12 @@ const items: NavGroup[] = [
   ]},
   { group: 'Manage', links: [
     { to: '/admin/products', label: 'Product approvals', icon: <Inventory2OutlinedIcon /> },
+    { to: '/admin/orders', label: 'Orders', icon: <ReceiptLongOutlinedIcon /> },
     { to: '/admin/users', label: 'Users', icon: <PeopleAltOutlinedIcon /> },
     { to: '/admin/sessions', label: 'Sessions', icon: <HistoryOutlinedIcon /> },
   ]},
   { group: 'System', links: [
+    { to: '/admin/payments', label: 'Payments & fees', icon: <PaymentsOutlinedIcon /> },
     { to: '/admin/settings', label: 'Settings', icon: <TuneOutlinedIcon /> },
     { to: '/', label: 'Back to site', icon: <HomeOutlinedIcon /> },
   ]},
@@ -94,9 +110,110 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
   const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
   const shortcut = isMac ? '⌘ B' : 'Ctrl B'
+  const searchShortcut = isMac ? '⌘ K' : 'Ctrl K'
 
   const crumb = loc.pathname.replace(/^\/admin\/?/, '') || 'dashboard'
   const crumbLabel = crumb.charAt(0).toUpperCase() + crumb.slice(1).replace(/-/g, ' ')
+  const activeLink = items.flatMap(g => g.links).find(l => l.to === loc.pathname)
+  const activeGroup = items.find(g => g.links.some(l => l.to === loc.pathname))?.group || 'Admin'
+
+  // Top navbar state
+  const [userMenuEl, setUserMenuEl] = useState<HTMLElement | null>(null)
+  const [notifEl, setNotifEl] = useState<HTMLElement | null>(null)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [paletteQ, setPaletteQ] = useState('')
+  const paletteInputRef = useRef<HTMLInputElement>(null)
+  const [notifs, setNotifs] = useState<AdminNotification[]>([])
+  const [unread, setUnread] = useState(0)
+  const [muted, setMuted] = useState(() => {
+    try { return localStorage.getItem('admin-notif-muted') === '1' } catch { return false }
+  })
+  const mutedRef = useRef(muted)
+  useEffect(() => { mutedRef.current = muted }, [muted])
+  const toggleMute = () => {
+    setMuted(m => {
+      const next = !m
+      try { localStorage.setItem('admin-notif-muted', next ? '1' : '0') } catch { /* ignore */ }
+      if (!next) playNotifSound() // brief confirmation chime when un-muting
+      return next
+    })
+  }
+
+  const loadNotifs = useCallback(async () => {
+    try {
+      const res = await api.adminNotifications(20)
+      setNotifs(res.items || [])
+      setUnread(res.unread || 0)
+    } catch { /* ignore */ }
+  }, [])
+
+  // Initial load + live stream via Server-Sent Events. No polling.
+  useEffect(() => {
+    loadNotifs()
+    const es = new EventSource('/api/admin/notifications/stream')
+    es.addEventListener('notification', (e) => {
+      try {
+        const n = JSON.parse((e as MessageEvent).data) as AdminNotification
+        setNotifs(prev => [n, ...prev.filter(x => x.id !== n.id)].slice(0, 50))
+        if (!n.readAt) {
+          setUnread(u => u + 1)
+          if (!mutedRef.current) playNotifSound()
+        }
+      } catch { /* ignore malformed event */ }
+    })
+    // EventSource auto-reconnects on transient errors; no manual handling needed.
+    return () => es.close()
+  }, [loadNotifs])
+
+  const markAllRead = async () => {
+    if (unread === 0) return
+    try {
+      await api.adminNotificationsRead()
+      setUnread(0)
+      setNotifs(prev => prev.map(n => n.readAt ? n : { ...n, readAt: new Date().toISOString() }))
+    } catch { /* ignore */ }
+  }
+
+  const onNotifClick = async (n: AdminNotification) => {
+    setNotifEl(null)
+    if (!n.readAt) {
+      try {
+        await api.adminNotificationsRead([n.id])
+        setUnread(u => Math.max(0, u - 1))
+        setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, readAt: new Date().toISOString() } : x))
+      } catch { /* ignore */ }
+    }
+    if (n.link) nav(n.link)
+  }
+
+  const flatNav = useMemo(() => items.flatMap(g => g.links.map(l => ({ ...l, group: g.group }))), [])
+  const paletteResults = useMemo(() => {
+    const q = paletteQ.trim().toLowerCase()
+    if (!q) return flatNav
+    return flatNav.filter(l =>
+      l.label.toLowerCase().includes(q) ||
+      l.group.toLowerCase().includes(q) ||
+      l.to.includes(q)
+    )
+  }, [flatNav, paletteQ])
+
+  // Cmd/Ctrl + K opens nav palette
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setPaletteOpen(true)
+        setTimeout(() => paletteInputRef.current?.focus(), 0)
+      }
+      if (e.key === 'Escape' && paletteOpen) {
+        setPaletteOpen(false); setPaletteQ('')
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [paletteOpen])
+
+  const goSignOut = async () => { setUserMenuEl(null); await signOut(); nav('/login') }
 
   return (
     <Box sx={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
@@ -351,35 +468,309 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       </aside>
 
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, height: '100vh' }}>
-        <AppBar position="static" elevation={0} sx={{
-          bgcolor: '#fff', color: 'text.primary', borderBottom: 1, borderColor: 'divider',
+        <AppBar position="sticky" elevation={0} sx={{
+          bgcolor: 'rgba(255,255,255,0.85)',
+          color: 'text.primary',
+          borderBottom: 1, borderColor: 'divider',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          top: 0, zIndex: 30,
         }}>
-          <Toolbar sx={{ gap: 1 }}>
-            <Typography sx={{ color: 'text.secondary', fontSize: 14 }}>
-              Admin / <Box component="span" sx={{ color: 'text.primary', fontWeight: 600 }}>{crumbLabel}</Box>
-            </Typography>
+          <Toolbar sx={{ gap: 1.25, minHeight: 60, px: { xs: 1.5, md: 2.5 } }}>
+            {/* Breadcrumb */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
+              <Chip label="Admin" size="small"
+                sx={{
+                  height: 22, fontWeight: 700, fontSize: 11,
+                  background: 'linear-gradient(135deg, rgba(99,102,241,0.12), rgba(168,85,247,0.12))',
+                  color: 'primary.main', textTransform: 'uppercase', letterSpacing: '0.06em',
+                  border: '1px solid', borderColor: 'rgba(99,102,241,0.18)',
+                  '& .MuiChip-label': { px: 1 },
+                }} />
+              <ChevronRightIcon sx={{ fontSize: 14, color: 'text.disabled' }} />
+              <Typography sx={{ fontSize: 13, color: 'text.secondary', fontWeight: 500 }}>
+                {activeGroup}
+              </Typography>
+              <ChevronRightIcon sx={{ fontSize: 14, color: 'text.disabled' }} />
+              <Typography sx={{ fontSize: 14, color: 'text.primary', fontWeight: 700 }} noWrap>
+                {activeLink?.label || crumbLabel}
+              </Typography>
+            </Box>
+
+            {/* Spacer + center palette opener */}
             <Box sx={{ flex: 1 }} />
-            <Tooltip title="Notifications">
-              <IconButton size="small" sx={{ color: 'text.secondary' }}>
-                <NotificationsNoneOutlinedIcon sx={{ fontSize: 22 }} />
+            <Box
+              onClick={() => { setPaletteOpen(true); setTimeout(() => paletteInputRef.current?.focus(), 0) }}
+              sx={{
+                display: { xs: 'none', md: 'flex' }, alignItems: 'center', gap: 1,
+                cursor: 'pointer', height: 36, minWidth: 280, maxWidth: 360,
+                px: 1.25, borderRadius: 2,
+                bgcolor: '#f1f5f9',
+                border: '1px solid', borderColor: 'transparent',
+                transition: 'background-color .15s, border-color .15s',
+                '&:hover': { bgcolor: '#e2e8f0', borderColor: 'rgba(15,23,42,0.08)' },
+              }}>
+              <SearchIcon sx={{ fontSize: 18, color: 'text.disabled' }} />
+              <Typography sx={{ fontSize: 13, color: 'text.disabled', flex: 1 }}>
+                Jump to page…
+              </Typography>
+              <Box component="kbd" sx={{
+                fontSize: 10, fontWeight: 700, color: 'text.secondary',
+                px: 0.75, py: 0.25, borderRadius: 1,
+                bgcolor: '#fff', border: '1px solid', borderColor: 'rgba(15,23,42,0.08)',
+                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+              }}>{searchShortcut}</Box>
+            </Box>
+            <Box sx={{ flex: 1 }} />
+
+            {/* Right-side actions */}
+            <Tooltip title="Refresh">
+              <IconButton size="small" onClick={() => window.location.reload()}
+                sx={{ color: 'text.secondary' }}>
+                <RefreshOutlinedIcon sx={{ fontSize: 20 }} />
               </IconButton>
             </Tooltip>
-            <Avatar src={settings?.logoPath || undefined}
-              sx={{ width: 28, height: 28, bgcolor: theme.palette.primary.main, fontSize: 12, mr: 0.5 }}>
-              {brandInitial}
-            </Avatar>
-            <IconButton size="small" onClick={async () => { await signOut(); nav('/login') }} title="Sign out">
-              <Avatar src={user?.avatarPath || undefined}
-                sx={{ width: 32, height: 32, bgcolor: theme.palette.primary.main, fontSize: 14 }}>
-                {initial}
-              </Avatar>
-            </IconButton>
+
+            <Tooltip title="View site">
+              <IconButton size="small" component={RouterLink} to="/"
+                sx={{ color: 'text.secondary' }}>
+                <OpenInNewIcon sx={{ fontSize: 18 }} />
+              </IconButton>
+            </Tooltip>
+
+            <Tooltip title={muted ? 'Unmute notification sound' : 'Mute notification sound'}>
+              <IconButton size="small" onClick={toggleMute}
+                sx={{ color: muted ? 'error.main' : 'text.secondary' }}>
+                {muted
+                  ? <VolumeOffOutlinedIcon sx={{ fontSize: 20 }} />
+                  : <VolumeUpOutlinedIcon sx={{ fontSize: 20 }} />}
+              </IconButton>
+            </Tooltip>
+
+            <Tooltip title={unread > 0 ? `${unread} unread` : 'Notifications'}>
+              <IconButton size="small" onClick={(e) => setNotifEl(e.currentTarget)}
+                sx={{ color: 'text.secondary', position: 'relative' }}>
+                <NotificationsNoneOutlinedIcon sx={{ fontSize: 22 }} />
+                {unread > 0 && (
+                  <Box sx={{
+                    position: 'absolute', top: 2, right: 2,
+                    minWidth: 16, height: 16, px: 0.5, borderRadius: 99,
+                    background: 'linear-gradient(135deg, #f43f5e, #e11d48)',
+                    color: '#fff', fontSize: 10, fontWeight: 800,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    border: '2px solid #fff', lineHeight: 1,
+                  }}>{unread > 99 ? '99+' : unread}</Box>
+                )}
+              </IconButton>
+            </Tooltip>
+
+            <Divider orientation="vertical" flexItem sx={{ mx: 0.5, my: 1 }} />
+
+            <Tooltip title="Account">
+              <Box
+                onClick={(e) => setUserMenuEl(e.currentTarget)}
+                sx={{
+                  display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer',
+                  px: 0.75, py: 0.5, borderRadius: 99,
+                  transition: 'background-color .15s',
+                  '&:hover': { bgcolor: '#f1f5f9' },
+                }}>
+                <Avatar src={user?.avatarPath || undefined}
+                  sx={{
+                    width: 32, height: 32,
+                    bgcolor: theme.palette.primary.main, fontSize: 13, fontWeight: 700,
+                    boxShadow: '0 0 0 2px rgba(99,102,241,0.18)',
+                  }}>{initial}</Avatar>
+                <Box sx={{ display: { xs: 'none', sm: 'block' }, minWidth: 0, mr: 0.5 }}>
+                  <Typography sx={{ fontSize: 12.5, fontWeight: 700, lineHeight: 1.1 }} noWrap>
+                    {user?.displayName || user?.username}
+                  </Typography>
+                  <Typography sx={{ fontSize: 10, color: 'text.disabled', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    {user?.role}
+                  </Typography>
+                </Box>
+              </Box>
+            </Tooltip>
           </Toolbar>
         </AppBar>
+
+        {/* Notifications dropdown */}
+        <Menu anchorEl={notifEl} open={!!notifEl} onClose={() => setNotifEl(null)}
+          slotProps={{ paper: { sx: { minWidth: 360, maxWidth: 400, borderRadius: 2, mt: 1, p: 0 } } }}>
+          <Box sx={{ px: 2, py: 1.25, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography sx={{ fontSize: 13, fontWeight: 700 }}>Notifications</Typography>
+              {unread > 0 && (
+                <Chip size="small" label={`${unread} new`}
+                  sx={{ height: 18, fontSize: 10, fontWeight: 700, bgcolor: 'rgba(225,29,72,0.12)', color: '#e11d48' }} />
+              )}
+            </Box>
+            <IconButton size="small" onClick={markAllRead} disabled={unread === 0}
+              sx={{ fontSize: 11, color: 'text.secondary' }}>
+              <Typography sx={{ fontSize: 11, fontWeight: 600 }}>Mark all read</Typography>
+            </IconButton>
+          </Box>
+          {notifs.length === 0 ? (
+            <Box sx={{ px: 2, py: 4, textAlign: 'center' }}>
+              <NotificationsNoneOutlinedIcon sx={{ fontSize: 36, color: 'grey.300', mb: 1 }} />
+              <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>You're all caught up.</Typography>
+              <Typography sx={{ fontSize: 11, color: 'text.disabled' }}>System events will show up here.</Typography>
+            </Box>
+          ) : (
+            <Box sx={{ maxHeight: 420, overflowY: 'auto', py: 0.5 }}>
+              {notifs.map(n => {
+                const isUnread = !n.readAt
+                return (
+                  <Box key={n.id} onClick={() => onNotifClick(n)}
+                    sx={{
+                      px: 2, py: 1.25, cursor: 'pointer',
+                      display: 'flex', alignItems: 'flex-start', gap: 1.25,
+                      transition: 'background-color .1s',
+                      bgcolor: isUnread ? 'rgba(99,102,241,0.04)' : 'transparent',
+                      '&:hover': { bgcolor: 'rgba(99,102,241,0.08)' },
+                    }}>
+                    <Box sx={{
+                      width: 32, height: 32, borderRadius: 1.5, flexShrink: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(168,85,247,0.15))',
+                      color: 'primary.main',
+                    }}>
+                      {kindIcon(n.kind)}
+                    </Box>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Stack direction="row" sx={{ alignItems: 'center', gap: 0.5 }}>
+                        <Typography sx={{ fontSize: 13, fontWeight: isUnread ? 700 : 600, flex: 1 }} noWrap>
+                          {n.title}
+                        </Typography>
+                        {isUnread && <CircleIcon sx={{ fontSize: 8, color: 'primary.main' }} />}
+                      </Stack>
+                      <Typography sx={{ fontSize: 12, color: 'text.secondary',
+                        display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2,
+                        overflow: 'hidden' }}>
+                        {n.body}
+                      </Typography>
+                      <Typography sx={{ fontSize: 11, color: 'text.disabled', mt: 0.25 }}>
+                        {relTime(n.createdAt)}
+                      </Typography>
+                    </Box>
+                  </Box>
+                )
+              })}
+            </Box>
+          )}
+        </Menu>
+
+        {/* User menu */}
+        <Menu anchorEl={userMenuEl} open={!!userMenuEl} onClose={() => setUserMenuEl(null)}
+          slotProps={{ paper: { sx: { minWidth: 220, borderRadius: 2, mt: 1 } } }}>
+          <Box sx={{ px: 2, py: 1.25 }}>
+            <Typography sx={{ fontSize: 13, fontWeight: 700 }} noWrap>
+              {user?.displayName || user?.username}
+            </Typography>
+            <Typography sx={{ fontSize: 11, color: 'text.disabled' }} noWrap>
+              {user?.email || '—'}
+            </Typography>
+          </Box>
+          <Divider />
+          <MenuItem component={RouterLink} to="/profile" onClick={() => setUserMenuEl(null)}>
+            <ListItemIcon><PersonOutlineOutlinedIcon fontSize="small" /></ListItemIcon>
+            <ListItemText primary="Profile" slotProps={{ primary: { sx: { fontSize: 14 } } }} />
+          </MenuItem>
+          <MenuItem component={RouterLink} to="/" onClick={() => setUserMenuEl(null)}>
+            <ListItemIcon><HomeOutlinedIcon fontSize="small" /></ListItemIcon>
+            <ListItemText primary="View site" slotProps={{ primary: { sx: { fontSize: 14 } } }} />
+          </MenuItem>
+          <Divider />
+          <MenuItem onClick={goSignOut} sx={{ color: 'error.main' }}>
+            <ListItemIcon sx={{ color: 'error.main' }}><LogoutOutlinedIcon fontSize="small" /></ListItemIcon>
+            <ListItemText primary="Sign out" slotProps={{ primary: { sx: { fontSize: 14, fontWeight: 600 } } }} />
+          </MenuItem>
+        </Menu>
+
+        {/* Command palette */}
+        {paletteOpen && (
+          <Box sx={{
+            position: 'fixed', inset: 0, zIndex: 1500,
+            display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+            pt: { xs: 6, md: 12 }, px: 2,
+            bgcolor: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(4px)',
+          }}>
+            <ClickAwayListener onClickAway={() => { setPaletteOpen(false); setPaletteQ('') }}>
+              <Paper elevation={12} sx={{
+                width: '100%', maxWidth: 520, borderRadius: 3, overflow: 'hidden',
+                boxShadow: '0 30px 80px -20px rgba(15,23,42,0.4)',
+              }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 1.25, borderBottom: 1, borderColor: 'divider' }}>
+                  <SearchIcon sx={{ color: 'text.disabled' }} />
+                  <InputBase autoFocus inputRef={paletteInputRef}
+                    placeholder="Jump to a page…"
+                    value={paletteQ} onChange={e => setPaletteQ(e.target.value)}
+                    sx={{ flex: 1, fontSize: 15 }} />
+                  <Box component="kbd" sx={{
+                    fontSize: 10, fontWeight: 700, color: 'text.secondary',
+                    px: 0.75, py: 0.25, borderRadius: 1,
+                    bgcolor: '#f1f5f9', border: '1px solid', borderColor: 'divider',
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                  }}>ESC</Box>
+                </Box>
+                <Box sx={{ maxHeight: 360, overflowY: 'auto', py: 0.5 }}>
+                  {paletteResults.length === 0 ? (
+                    <Typography sx={{ p: 3, textAlign: 'center', color: 'text.secondary', fontSize: 13 }}>
+                      No pages match "{paletteQ}".
+                    </Typography>
+                  ) : paletteResults.map((l) => (
+                    <Box key={l.to}
+                      onClick={() => { setPaletteOpen(false); setPaletteQ(''); nav(l.to) }}
+                      sx={{
+                        display: 'flex', alignItems: 'center', gap: 1.25,
+                        px: 2, py: 1.25, cursor: 'pointer',
+                        transition: 'background-color .1s',
+                        '&:hover': { bgcolor: 'rgba(99,102,241,0.06)' },
+                      }}>
+                      <Box sx={{
+                        width: 28, height: 28, borderRadius: 1.5,
+                        background: 'linear-gradient(135deg, rgba(99,102,241,0.12), rgba(168,85,247,0.12))',
+                        color: 'primary.main',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        {sizedIcon(l.icon, 16)}
+                      </Box>
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <Typography sx={{ fontSize: 13.5, fontWeight: 600 }} noWrap>{l.label}</Typography>
+                        <Typography sx={{ fontSize: 11, color: 'text.disabled' }} noWrap>{l.group} · {l.to}</Typography>
+                      </Box>
+                      <ChevronRightIcon sx={{ fontSize: 16, color: 'text.disabled' }} />
+                    </Box>
+                  ))}
+                </Box>
+              </Paper>
+            </ClickAwayListener>
+          </Box>
+        )}
         <Box component="main" sx={{ flex: 1, overflowY: 'auto', p: { xs: 2, md: 3 }, bgcolor: 'background.default' }}>
           {children}
         </Box>
       </Box>
     </Box>
   )
+}
+
+function kindIcon(kind: string) {
+  switch (kind) {
+    case 'product_created':
+      return <Inventory2OutlinedIcon sx={{ fontSize: 18 }} />
+    default:
+      return <NotificationsNoneOutlinedIcon sx={{ fontSize: 18 }} />
+  }
+}
+
+function relTime(iso: string): string {
+  const t = new Date(iso).getTime()
+  if (!isFinite(t)) return ''
+  const diff = Date.now() - t
+  if (diff < 60_000) return 'just now'
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
+  if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)}d ago`
+  return new Date(iso).toLocaleDateString()
 }

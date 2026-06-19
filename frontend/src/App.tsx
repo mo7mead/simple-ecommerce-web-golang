@@ -1,6 +1,8 @@
 import { ThemeProvider, createTheme, CssBaseline, CircularProgress, Box } from '@mui/material'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './AuthContext'
+import { ToastProvider } from './Toast'
+import { CartProvider } from './CartContext'
 import Layout from './Layout'
 import AdminLayout from './AdminLayout'
 import SellerLayout from './SellerLayout'
@@ -20,6 +22,12 @@ import SellerDashboard from './pages/seller/Dashboard'
 import SellerProducts from './pages/seller/Products'
 import SellerProductCreate from './pages/seller/ProductCreate'
 import AdminProducts from './pages/admin/Products'
+import AdminPayments from './pages/admin/Payments'
+import AdminOrders from './pages/admin/Orders'
+import AdminOrderDetail from './pages/admin/OrderDetail'
+import Cart from './pages/Cart'
+import Checkout from './pages/Checkout'
+import Orders from './pages/Orders'
 
 function Protected({ children, role }: { children: React.ReactNode; role?: string }) {
   const { user, loading } = useAuth()
@@ -49,6 +57,8 @@ function ThemedApp() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
+      <ToastProvider>
+      <CartProvider>
       <Routes>
         <Route path="/admin/dashboard" element={adminPage(<AdminDashboard />)} />
         <Route path="/admin/users" element={adminPage(<AdminUsers />)} />
@@ -60,6 +70,9 @@ function ThemedApp() {
         <Route path="/admin/flash-sales" element={adminPage(<AdminFlashSales />)} />
         <Route path="/admin/brands" element={adminPage(<AdminBrands />)} />
         <Route path="/admin/products" element={adminPage(<AdminProducts />)} />
+        <Route path="/admin/payments" element={adminPage(<AdminPayments />)} />
+        <Route path="/admin/orders" element={adminPage(<AdminOrders />)} />
+        <Route path="/admin/orders/:ref" element={adminPage(<AdminOrderDetail />)} />
         <Route path="/admin/*" element={adminPage(<Navigate to="/admin/dashboard" replace />)} />
 
         <Route path="/seller/dashboard" element={sellerPage(<SellerDashboard />)} />
@@ -73,11 +86,16 @@ function ThemedApp() {
               <Route path="/" element={<Home />} />
               <Route path="/login" element={<Login />} />
               <Route path="/profile" element={<Protected><Profile /></Protected>} />
+              <Route path="/cart" element={<Cart />} />
+              <Route path="/checkout" element={<Checkout />} />
+              <Route path="/orders" element={<Protected><Orders /></Protected>} />
               <Route path="*" element={<Box sx={{ p: 4 }}>Page not found.</Box>} />
             </Routes>
           </Layout>
         } />
       </Routes>
+      </CartProvider>
+      </ToastProvider>
     </ThemeProvider>
   )
 }

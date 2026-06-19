@@ -5,9 +5,12 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -64,6 +67,9 @@ type Settings struct {
 	Tagline     string
 	LogoPath    string
 	AccentColor string
+	CodEnabled  bool
+	CodFee      float64
+	ShippingFee float64
 }
 
 type Category struct {
@@ -145,11 +151,57 @@ type SellerStats struct {
 }
 
 type Store struct {
-	db *sql.DB
+	db        *sql.DB
+	notifMu   sync.Mutex
+	notifSubs []*notifSub
+}
+
+type notifSub struct {
+	ch       chan Notification
+	audience string
 }
 
 func New(db *sql.DB) *Store {
 	return &Store{db: db}
+}
+
+// SubscribeNotifications registers a buffered channel that receives every new
+// notification whose audience matches (empty filter = all audiences). The
+// returned cancel must be called to release resources.
+func (s *Store) SubscribeNotifications(audience string, buf int) (<-chan Notification, func()) {
+	if buf <= 0 {
+		buf = 16
+	}
+	sub := &notifSub{ch: make(chan Notification, buf), audience: audience}
+	s.notifMu.Lock()
+	s.notifSubs = append(s.notifSubs, sub)
+	s.notifMu.Unlock()
+	return sub.ch, func() {
+		s.notifMu.Lock()
+		defer s.notifMu.Unlock()
+		for i, x := range s.notifSubs {
+			if x == sub {
+				s.notifSubs = append(s.notifSubs[:i], s.notifSubs[i+1:]...)
+				close(sub.ch)
+				return
+			}
+		}
+	}
+}
+
+func (s *Store) publishNotification(n Notification) {
+	s.notifMu.Lock()
+	defer s.notifMu.Unlock()
+	for _, sub := range s.notifSubs {
+		if sub.audience != "" && sub.audience != n.Audience {
+			continue
+		}
+		// non-blocking: drop on slow consumer to keep the publisher fast.
+		select {
+		case sub.ch <- n:
+		default:
+		}
+	}
 }
 
 func (s *Store) Migrate(ctx context.Context) error {
@@ -226,6 +278,19 @@ func (s *Store) Migrate(ctx context.Context) error {
 			INDEX idx_flash_position (position),
 			INDEX idx_flash_product (product_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+		`CREATE TABLE IF NOT EXISTS notifications (
+			id INT AUTO_INCREMENT PRIMARY KEY,
+			audience VARCHAR(32) NOT NULL,
+			kind VARCHAR(64) NOT NULL,
+			title VARCHAR(255) NOT NULL,
+			body VARCHAR(500) NOT NULL DEFAULT '',
+			link VARCHAR(255) NOT NULL DEFAULT '',
+			related_id INT NULL,
+			read_at DATETIME NULL,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			INDEX idx_notif_audience_read (audience, read_at),
+			INDEX idx_notif_audience_created (audience, created_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 		`CREATE TABLE IF NOT EXISTS products (
 			id INT AUTO_INCREMENT PRIMARY KEY,
 			seller_id INT NOT NULL,
@@ -247,6 +312,26 @@ func (s *Store) Migrate(ctx context.Context) error {
 			UNIQUE KEY uniq_product_sku (sku),
 			INDEX idx_seller (seller_id),
 			INDEX idx_product_status (status)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+		`CREATE TABLE IF NOT EXISTS orders (
+			id INT AUTO_INCREMENT PRIMARY KEY,
+			user_id INT NOT NULL,
+			ref VARCHAR(48) NOT NULL DEFAULT '',
+			customer_name VARCHAR(160) NOT NULL,
+			phone VARCHAR(40) NOT NULL,
+			address VARCHAR(500) NOT NULL,
+			items_json TEXT NOT NULL,
+			subtotal DECIMAL(12,2) NOT NULL DEFAULT 0,
+			shipping_fee DECIMAL(10,2) NOT NULL DEFAULT 0,
+			cod_fee DECIMAL(10,2) NOT NULL DEFAULT 0,
+			total DECIMAL(12,2) NOT NULL DEFAULT 0,
+			payment_method VARCHAR(16) NOT NULL DEFAULT 'cod',
+			status VARCHAR(16) NOT NULL DEFAULT 'pending',
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			INDEX idx_orders_user (user_id),
+			INDEX idx_orders_status (status),
+			INDEX idx_orders_ref (ref)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 	}
 	for _, q := range stmts {
@@ -297,7 +382,68 @@ func (s *Store) Migrate(ctx context.Context) error {
 			_, _ = s.db.ExecContext(ctx, `UPDATE products SET sku = ? WHERE id = ?`, sku, id)
 		}
 	}
+
+	// Orders: backfill ref for legacy rows + ensure column exists on older installs.
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE orders ADD COLUMN ref VARCHAR(48) NOT NULL DEFAULT ''`)
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE orders ADD INDEX idx_orders_ref (ref)`)
+	if rows, err := s.db.QueryContext(ctx, `SELECT id FROM orders WHERE ref = ''`); err == nil {
+		var ids []int64
+		for rows.Next() {
+			var id int64
+			if rows.Scan(&id) == nil {
+				ids = append(ids, id)
+			}
+		}
+		rows.Close()
+		if len(ids) > 0 {
+			settings, _ := s.Settings(ctx)
+			for _, id := range ids {
+				ref, _ := s.uniqueOrderRef(ctx, settings.SiteName)
+				_, _ = s.db.ExecContext(ctx, `UPDATE orders SET ref = ? WHERE id = ?`, ref, id)
+			}
+		}
+	}
+
 	return nil
+}
+
+func slugifySiteName(name string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(name) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		}
+	}
+	out := b.String()
+	if out == "" {
+		out = "ord"
+	}
+	if len(out) > 16 {
+		out = out[:16]
+	}
+	return out
+}
+
+// uniqueOrderRef returns a human-friendly order reference like "zarttex-7HQ4ZP6L".
+func (s *Store) uniqueOrderRef(ctx context.Context, siteName string) (string, error) {
+	prefix := slugifySiteName(siteName)
+	for i := 0; i < 8; i++ {
+		buf := make([]byte, 4)
+		if _, err := rand.Read(buf); err != nil {
+			return "", fmt.Errorf("rand: %w", err)
+		}
+		ref := prefix + "-" + strings.ToUpper(hex.EncodeToString(buf))
+		var n int
+		err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM orders WHERE ref = ?`, ref).Scan(&n)
+		if err != nil {
+			return "", fmt.Errorf("check ref: %w", err)
+		}
+		if n == 0 {
+			return ref, nil
+		}
+	}
+	return "", fmt.Errorf("could not generate unique ref")
 }
 
 func (s *Store) EnsureUser(ctx context.Context, username, password, role string) error {
@@ -677,6 +823,7 @@ type CreateProductInput struct {
 
 // CreateProduct creates a product with an auto-generated SKU. Status defaults
 // to "pending" unless AutoApprove is set (admin-created products).
+// Pending submissions also create an admin-audience notification.
 func (s *Store) CreateProduct(ctx context.Context, sellerID int64, in CreateProductInput) (string, error) {
 	sku, err := s.uniqueSKU(ctx)
 	if err != nil {
@@ -686,7 +833,7 @@ func (s *Store) CreateProduct(ctx context.Context, sellerID int64, in CreateProd
 	if in.AutoApprove {
 		status = ProductApproved
 	}
-	_, err = s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO products (seller_id, sku, name, description, image_path, price, stock,
 			shipping_days, category_id, brand_id, status)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -695,7 +842,116 @@ func (s *Store) CreateProduct(ctx context.Context, sellerID int64, in CreateProd
 	if err != nil {
 		return "", fmt.Errorf("insert: %w", err)
 	}
+	if status == ProductPending {
+		productID, _ := res.LastInsertId()
+		seller, _ := s.FindUser(ctx, sellerID)
+		sellerName := seller.DisplayName
+		if sellerName == "" {
+			sellerName = seller.Username
+		}
+		_ = s.CreateNotification(ctx, Notification{
+			Audience:  "admin",
+			Kind:      "product_created",
+			Title:     "New product awaiting review",
+			Body:      fmt.Sprintf("%s submitted %q (SKU %s).", sellerName, in.Name, sku),
+			Link:      "/admin/products",
+			RelatedID: sql.NullInt64{Int64: productID, Valid: productID > 0},
+		})
+	}
 	return sku, nil
+}
+
+type Notification struct {
+	ID        int64
+	Audience  string
+	Kind      string
+	Title     string
+	Body      string
+	Link      string
+	RelatedID sql.NullInt64
+	ReadAt    sql.NullTime
+	CreatedAt time.Time
+}
+
+func (s *Store) CreateNotification(ctx context.Context, n Notification) error {
+	res, err := s.db.ExecContext(ctx, `
+		INSERT INTO notifications (audience, kind, title, body, link, related_id)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		n.Audience, n.Kind, n.Title, n.Body, n.Link, n.RelatedID)
+	if err != nil {
+		return fmt.Errorf("notify insert: %w", err)
+	}
+	if id, err := res.LastInsertId(); err == nil {
+		n.ID = id
+		n.CreatedAt = time.Now()
+		s.publishNotification(n)
+	}
+	return nil
+}
+
+// ListNotifications returns the most recent notifications for an audience
+// plus the unread count. Limit caps how many rows are returned.
+func (s *Store) ListNotifications(ctx context.Context, audience string, limit int) ([]Notification, int, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 25
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, audience, kind, title, body, link, related_id, read_at, created_at
+		FROM notifications
+		WHERE audience = ?
+		ORDER BY created_at DESC
+		LIMIT ?`, audience, limit)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list notifications: %w", err)
+	}
+	defer rows.Close()
+	out := make([]Notification, 0, limit)
+	for rows.Next() {
+		var n Notification
+		if err := rows.Scan(&n.ID, &n.Audience, &n.Kind, &n.Title, &n.Body, &n.Link,
+			&n.RelatedID, &n.ReadAt, &n.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, n)
+	}
+	var unread int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM notifications WHERE audience = ? AND read_at IS NULL`,
+		audience).Scan(&unread); err != nil {
+		return nil, 0, err
+	}
+	return out, unread, nil
+}
+
+// MarkNotificationsRead marks all notifications for the audience as read; if
+// ids is non-empty, only those IDs are marked. Returns rows affected.
+func (s *Store) MarkNotificationsRead(ctx context.Context, audience string, ids []int64) (int64, error) {
+	if len(ids) == 0 {
+		res, err := s.db.ExecContext(ctx,
+			`UPDATE notifications SET read_at = NOW() WHERE audience = ? AND read_at IS NULL`,
+			audience)
+		if err != nil {
+			return 0, fmt.Errorf("mark all read: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		return n, nil
+	}
+	placeholders := make([]string, len(ids))
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, audience)
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	q := fmt.Sprintf(
+		`UPDATE notifications SET read_at = NOW() WHERE audience = ? AND read_at IS NULL AND id IN (%s)`,
+		strings.Join(placeholders, ","))
+	res, err := s.db.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("mark ids read: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }
 
 func (s *Store) DeleteProduct(ctx context.Context, sellerID, productID int64) error {
@@ -724,6 +980,63 @@ func (s *Store) RejectProduct(ctx context.Context, productID int64, note string)
 		ProductRejected, note, productID, ProductPending)
 	if err != nil {
 		return fmt.Errorf("reject: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// BulkSetProductStatus applies the same status (and optional note for rejections)
+// to a slice of product IDs in a single round trip. Returns how many rows changed.
+func (s *Store) BulkSetProductStatus(ctx context.Context, ids []int64, status, note string) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	switch status {
+	case ProductPending, ProductApproved, ProductRejected:
+	default:
+		return 0, fmt.Errorf("invalid status %q", status)
+	}
+	if status != ProductRejected {
+		note = ""
+	}
+	placeholders := make([]string, len(ids))
+	args := make([]any, 0, len(ids)+2)
+	args = append(args, status, note)
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	q := fmt.Sprintf(
+		`UPDATE products SET status = ?, review_note = ? WHERE id IN (%s)`,
+		strings.Join(placeholders, ","),
+	)
+	res, err := s.db.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("bulk set status: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
+// SetProductStatus changes a product's status to any of pending/approved/rejected.
+// Unlike Approve/Reject, it does not require the current status to be pending.
+func (s *Store) SetProductStatus(ctx context.Context, productID int64, status, note string) error {
+	switch status {
+	case ProductPending, ProductApproved, ProductRejected:
+	default:
+		return fmt.Errorf("invalid status %q", status)
+	}
+	if status != ProductRejected {
+		note = ""
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE products SET status = ?, review_note = ? WHERE id = ?`,
+		status, note, productID)
+	if err != nil {
+		return fmt.Errorf("set status: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
@@ -878,7 +1191,7 @@ func (s *Store) Search(ctx context.Context, q string) (SearchResults, error) {
 }
 
 func (s *Store) Settings(ctx context.Context) (Settings, error) {
-	out := Settings{SiteName: "Simple Web App"}
+	out := Settings{SiteName: "Simple Web App", CodEnabled: true}
 	rows, err := s.db.QueryContext(ctx, `SELECT k, v FROM settings`)
 	if err != nil {
 		return out, fmt.Errorf("query: %w", err)
@@ -900,6 +1213,14 @@ func (s *Store) Settings(ctx context.Context) (Settings, error) {
 			out.LogoPath = v
 		case "accent_color":
 			out.AccentColor = v
+		case "cod_enabled":
+			out.CodEnabled = v != "0" && v != "false"
+		case "cod_fee":
+			f, _ := strconv.ParseFloat(v, 64)
+			out.CodFee = f
+		case "shipping_fee":
+			f, _ := strconv.ParseFloat(v, 64)
+			out.ShippingFee = f
 		}
 	}
 	return out, rows.Err()
@@ -1171,4 +1492,163 @@ func (s *Store) SellerStats(ctx context.Context, sellerID int64) (SellerStats, e
 		st.RecentProducts = append(st.RecentProducts, p)
 	}
 	return st, rows.Err()
+}
+
+type OrderItem struct {
+	ProductID int64   `json:"productId"`
+	Name      string  `json:"name"`
+	Price     float64 `json:"price"`
+	Qty       int     `json:"qty"`
+	ImagePath string  `json:"imagePath"`
+}
+
+type Order struct {
+	ID            int64
+	Ref           string
+	UserID        int64
+	Username      string
+	CustomerName  string
+	Phone         string
+	Address       string
+	Items         []OrderItem
+	Subtotal      float64
+	ShippingFee   float64
+	CodFee        float64
+	Total         float64
+	PaymentMethod string
+	Status        string
+	CreatedAt     time.Time
+}
+
+type CreateOrderInput struct {
+	UserID        int64
+	CustomerName  string
+	Phone         string
+	Address       string
+	Items         []OrderItem
+	Subtotal      float64
+	ShippingFee   float64
+	CodFee        float64
+	Total         float64
+	PaymentMethod string
+}
+
+func (s *Store) CreateOrder(ctx context.Context, in CreateOrderInput) (int64, string, error) {
+	itemsJSON, err := json.Marshal(in.Items)
+	if err != nil {
+		return 0, "", fmt.Errorf("marshal items: %w", err)
+	}
+	settings, _ := s.Settings(ctx)
+	ref, err := s.uniqueOrderRef(ctx, settings.SiteName)
+	if err != nil {
+		return 0, "", err
+	}
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO orders (user_id, ref, customer_name, phone, address, items_json,
+			subtotal, shipping_fee, cod_fee, total, payment_method, status)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+		in.UserID, ref, in.CustomerName, in.Phone, in.Address, string(itemsJSON),
+		in.Subtotal, in.ShippingFee, in.CodFee, in.Total, in.PaymentMethod)
+	if err != nil {
+		return 0, "", fmt.Errorf("insert order: %w", err)
+	}
+	id, err := res.LastInsertId()
+	return id, ref, err
+}
+
+const orderSelectCols = `o.id, o.ref, o.user_id, COALESCE(u.username,''), o.customer_name, o.phone, o.address,
+		o.items_json, o.subtotal, o.shipping_fee, o.cod_fee, o.total,
+		o.payment_method, o.status, o.created_at`
+
+func scanOrders(rows *sql.Rows) ([]Order, error) {
+	var out []Order
+	for rows.Next() {
+		var o Order
+		var itemsJSON string
+		if err := rows.Scan(&o.ID, &o.Ref, &o.UserID, &o.Username, &o.CustomerName, &o.Phone, &o.Address,
+			&itemsJSON, &o.Subtotal, &o.ShippingFee, &o.CodFee, &o.Total,
+			&o.PaymentMethod, &o.Status, &o.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan order: %w", err)
+		}
+		_ = json.Unmarshal([]byte(itemsJSON), &o.Items)
+		out = append(out, o)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ListUserOrders(ctx context.Context, userID int64) ([]Order, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+orderSelectCols+`
+		 FROM orders o LEFT JOIN users u ON u.id = o.user_id
+		 WHERE o.user_id = ? ORDER BY o.id DESC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("query orders: %w", err)
+	}
+	defer rows.Close()
+	return scanOrders(rows)
+}
+
+func (s *Store) ListAllOrders(ctx context.Context) ([]Order, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+orderSelectCols+`
+		 FROM orders o LEFT JOIN users u ON u.id = o.user_id
+		 ORDER BY o.id DESC LIMIT 500`)
+	if err != nil {
+		return nil, fmt.Errorf("query orders: %w", err)
+	}
+	defer rows.Close()
+	return scanOrders(rows)
+}
+
+func (s *Store) FindOrderByRef(ctx context.Context, ref string) (Order, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+orderSelectCols+`
+		 FROM orders o LEFT JOIN users u ON u.id = o.user_id
+		 WHERE o.ref = ? LIMIT 1`, ref)
+	if err != nil {
+		return Order{}, fmt.Errorf("query order: %w", err)
+	}
+	defer rows.Close()
+	list, err := scanOrders(rows)
+	if err != nil {
+		return Order{}, err
+	}
+	if len(list) == 0 {
+		return Order{}, ErrNotFound
+	}
+	return list[0], nil
+}
+
+func (s *Store) SetOrderStatus(ctx context.Context, id int64, status string) error {
+	switch status {
+	case "pending", "shipped", "delivered", "cancelled":
+	default:
+		return fmt.Errorf("invalid status")
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE orders SET status = ? WHERE id = ?`, status, id)
+	if err != nil {
+		return fmt.Errorf("update order: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) SetOrderStatusByRef(ctx context.Context, ref, status string) error {
+	switch status {
+	case "pending", "shipped", "delivered", "cancelled":
+	default:
+		return fmt.Errorf("invalid status")
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE orders SET status = ? WHERE ref = ?`, status, ref)
+	if err != nil {
+		return fmt.Errorf("update order: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

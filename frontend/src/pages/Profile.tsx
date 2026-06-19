@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  Box, Card, CardContent, TextField, Button, Typography, Alert, Stack, Avatar,
+  Box, Card, CardContent, TextField, Button, Typography, Stack, Avatar,
   Chip, Grid, Divider, IconButton, Tooltip, Dialog, DialogTitle, DialogContent,
   DialogContentText, DialogActions,
 } from '@mui/material'
+import { useToast } from '../Toast'
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
 import DeleteIcon from '@mui/icons-material/Delete'
 import ImageIcon from '@mui/icons-material/Image'
@@ -18,15 +19,11 @@ export default function Profile() {
   const [u, setU] = useState<User | null>(ctxUser)
   const [displayName, setDisplayName] = useState('')
   const [email, setEmail] = useState('')
-  const [savedInfo, setSavedInfo] = useState<string | null>(null)
-  const [errInfo, setErrInfo] = useState<string | null>(null)
   const [current, setCurrent] = useState('')
   const [newPass, setNewPass] = useState('')
   const [confirm, setConfirm] = useState('')
-  const [savedPwd, setSavedPwd] = useState<string | null>(null)
-  const [errPwd, setErrPwd] = useState<string | null>(null)
-  const [imgErr, setImgErr] = useState<string | null>(null)
   const [busy, setBusy] = useState<'avatar' | 'cover' | null>(null)
+  const toast = useToast()
   const [avatarMenu, setAvatarMenu] = useState<HTMLElement | null>(null)
   const [confirmKind, setConfirmKind] = useState<'avatar' | 'cover' | null>(null)
 
@@ -40,46 +37,48 @@ export default function Profile() {
   }, [])
 
   const saveInfo = async (e: React.FormEvent) => {
-    e.preventDefault(); setSavedInfo(null); setErrInfo(null)
+    e.preventDefault()
     try {
       const fresh = await api.updateProfile(displayName, email)
-      setU(fresh); setSavedInfo('Profile updated.'); refresh()
-    } catch (e) { setErrInfo((e as Error).message) }
+      setU(fresh); toast.success('Profile updated.'); refresh()
+    } catch (e) { toast.error(e) }
   }
 
   const savePassword = async (e: React.FormEvent) => {
-    e.preventDefault(); setSavedPwd(null); setErrPwd(null)
-    if (newPass !== confirm) { setErrPwd('New password and confirmation do not match.'); return }
+    e.preventDefault()
+    if (newPass !== confirm) { toast.error('New password and confirmation do not match.'); return }
     try {
       await api.changePassword(current, newPass)
-      setSavedPwd('Password changed.'); setCurrent(''); setNewPass(''); setConfirm('')
-    } catch (e) { setErrPwd((e as Error).message) }
+      toast.success('Password changed.'); setCurrent(''); setNewPass(''); setConfirm('')
+    } catch (e) { toast.error(e) }
   }
 
   const onAvatarFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]; if (!f) return
-    setImgErr(null); setBusy('avatar')
+    setBusy('avatar')
     try {
-      const fresh = await api.uploadAvatar(f); setU(fresh); refresh()
-    } catch (e) { setImgErr((e as Error).message) }
+      const fresh = await api.uploadAvatar(f); setU(fresh); toast.success('Avatar updated.'); refresh()
+    } catch (e) { toast.error(e) }
     finally { setBusy(null); if (avatarInput.current) avatarInput.current.value = '' }
   }
   const doAvatarDelete = async () => {
     setBusy('avatar')
-    try { const fresh = await api.deleteAvatar(); setU(fresh); refresh() }
+    try { const fresh = await api.deleteAvatar(); setU(fresh); toast.success('Avatar removed.'); refresh() }
+    catch (e) { toast.error(e) }
     finally { setBusy(null); setConfirmKind(null) }
   }
   const onCoverFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]; if (!f) return
-    setImgErr(null); setBusy('cover')
+    setBusy('cover')
     try {
-      const fresh = await api.uploadCover(f); setU(fresh); refresh()
-    } catch (e) { setImgErr((e as Error).message) }
+      const fresh = await api.uploadCover(f); setU(fresh); toast.success('Cover updated.'); refresh()
+    } catch (e) { toast.error(e) }
     finally { setBusy(null); if (coverInput.current) coverInput.current.value = '' }
   }
   const doCoverDelete = async () => {
     setBusy('cover')
-    try { const fresh = await api.deleteCover(); setU(fresh); refresh() }
+    try { const fresh = await api.deleteCover(); setU(fresh); toast.success('Cover removed.'); refresh() }
+    catch (e) { toast.error(e) }
     finally { setBusy(null); setConfirmKind(null) }
   }
 
@@ -88,8 +87,6 @@ export default function Profile() {
 
   return (
     <Stack spacing={3}>
-      {imgErr && <Alert severity="error" onClose={() => setImgErr(null)}>{imgErr}</Alert>}
-
       {/* Hero card with cover + avatar */}
       <Card sx={{ overflow: 'hidden', position: 'relative' }}>
         <Box sx={{
@@ -205,8 +202,6 @@ export default function Profile() {
               </Typography>
               <form onSubmit={saveInfo}>
                 <Stack spacing={2}>
-                  {savedInfo && <Alert severity="success">{savedInfo}</Alert>}
-                  {errInfo && <Alert severity="error">{errInfo}</Alert>}
                   <TextField label="Display name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} fullWidth />
                   <TextField label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} fullWidth />
                   <TextField label="Username" value={u.username} disabled fullWidth />
@@ -227,8 +222,6 @@ export default function Profile() {
               </Typography>
               <form onSubmit={savePassword}>
                 <Stack spacing={2}>
-                  {savedPwd && <Alert severity="success">{savedPwd}</Alert>}
-                  {errPwd && <Alert severity="error">{errPwd}</Alert>}
                   <TextField label="Current password" type="password" value={current} onChange={(e) => setCurrent(e.target.value)} required fullWidth autoComplete="current-password" />
                   <TextField label="New password" type="password" value={newPass} onChange={(e) => setNewPass(e.target.value)} required fullWidth autoComplete="new-password" />
                   <TextField label="Confirm new password" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required fullWidth autoComplete="new-password" />

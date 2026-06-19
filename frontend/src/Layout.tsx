@@ -23,6 +23,8 @@ import { Link as RouterLink, NavLink, useNavigate } from 'react-router-dom'
 import { useState, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { useAuth } from './AuthContext'
 import { api, type Category } from './api'
+import { CategoryIcon } from './categoryIcons'
+import { useCart } from './CartContext'
 
 const flatten = (cats: Category[]): Category[] => {
   const out: Category[] = []
@@ -33,6 +35,7 @@ const flatten = (cats: Category[]): Category[] => {
 
 export default function Layout({ children }: { children: ReactNode }) {
   const { user, settings, signOut } = useAuth()
+  const { count: cartCount } = useCart()
   const theme = useTheme()
   const mdUp = useMediaQuery(theme.breakpoints.up('md'))
   const nav = useNavigate()
@@ -175,7 +178,14 @@ export default function Layout({ children }: { children: ReactNode }) {
                 >
                   <MenuItem value="all">All categories</MenuItem>
                   {topLevel.map((c) => (
-                    <MenuItem key={c.id} value={c.slug}>{c.icon ? `${c.icon} ` : ''}{c.name}</MenuItem>
+                    <MenuItem key={c.id} value={c.slug}>
+                      {c.icon && (
+                        <Box component="span" sx={{ mr: 0.75, display: 'inline-flex', alignItems: 'center' }}>
+                          <CategoryIcon name={c.icon} size={16} />
+                        </Box>
+                      )}
+                      {c.name}
+                    </MenuItem>
                   ))}
                 </Select>
                 <TextField
@@ -224,8 +234,8 @@ export default function Layout({ children }: { children: ReactNode }) {
                                 nav(`/search?q=${encodeURIComponent(s.name)}`)
                               }}
                             >
-                              <ListItemIcon sx={{ minWidth: 32, fontSize: 18 }}>
-                                {s.icon || <SearchIcon sx={{ fontSize: 18, color: '#64748b' }} />}
+                              <ListItemIcon sx={{ minWidth: 32, color: 'primary.main' }}>
+                                {s.icon ? <CategoryIcon name={s.icon} size={18} /> : <SearchIcon sx={{ fontSize: 18, color: '#64748b' }} />}
                               </ListItemIcon>
                               <ListItemText
                                 primary={s.name}
@@ -256,7 +266,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               </Tooltip>
               <Tooltip title="Cart">
                 <IconButton component={RouterLink} to="/cart" sx={{ color: '#fff' }}>
-                  <Badge badgeContent={0} color="primary" showZero={false}>
+                  <Badge badgeContent={cartCount} color="primary" showZero={false}>
                     <ShoppingCartOutlinedIcon />
                   </Badge>
                 </IconButton>
@@ -387,7 +397,11 @@ export default function Layout({ children }: { children: ReactNode }) {
                         '&:hover': { color: '#fff', bgcolor: 'rgba(255,255,255,0.06)' },
                       }}
                     >
-                      {c.icon && <Box component="span" sx={{ mr: 0.5 }}>{c.icon}</Box>}
+                      {c.icon && (
+                        <Box component="span" sx={{ mr: 0.5, display: 'inline-flex', alignItems: 'center' }}>
+                          <CategoryIcon name={c.icon} size={16} />
+                        </Box>
+                      )}
                       {c.name}
                     </Button>
                   ))}
@@ -442,7 +456,9 @@ export default function Layout({ children }: { children: ReactNode }) {
                         '&:hover': { color: 'primary.main' },
                       }}
                     >
-                      <Box component="span" sx={{ fontSize: 16 }}>{sub.icon || '•'}</Box>
+                      <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', color: 'primary.main' }}>
+                        {sub.icon ? <CategoryIcon name={sub.icon} size={18} /> : <Box component="span">•</Box>}
+                      </Box>
                       {sub.name}
                     </Box>
                     <Stack spacing={0.5}>
@@ -481,7 +497,9 @@ export default function Layout({ children }: { children: ReactNode }) {
               onClick={() => { setAllMenuAnchor(null); nav(`/category/${c.slug}`) }}
               sx={{ fontSize: 14 }}
             >
-              <Box component="span" sx={{ mr: 1.5, width: 20, textAlign: 'center' }}>{c.icon || '•'}</Box>
+              <Box component="span" sx={{ mr: 1.5, width: 20, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'text.secondary' }}>
+                {c.icon ? <CategoryIcon name={c.icon} size={18} /> : <Box component="span">•</Box>}
+              </Box>
               {c.name}
             </MenuItem>
           ))}
@@ -528,8 +546,8 @@ export default function Layout({ children }: { children: ReactNode }) {
                     else { nav(`/category/${c.slug}`); setDrawerOpen(false) }
                   }}
                 >
-                  <ListItemIcon sx={{ minWidth: 32 }}>
-                    <Box component="span" sx={{ fontSize: 18 }}>{c.icon || '•'}</Box>
+                  <ListItemIcon sx={{ minWidth: 32, color: 'primary.main' }}>
+                    {c.icon ? <CategoryIcon name={c.icon} size={20} /> : <Box component="span" sx={{ fontSize: 18 }}>•</Box>}
                   </ListItemIcon>
                   <ListItemText primary={c.name} />
                   {hasKids && (open ? <ExpandLessIcon /> : <ExpandMoreIcon />)}

@@ -7,10 +7,12 @@ import CloudUploadIcon from '@mui/icons-material/CloudUpload'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { Link as RouterLink, useNavigate } from 'react-router-dom'
 import { api, type Category, type Brand } from '../../api'
+import { useToast } from '../../Toast'
 
 export default function SellerProductCreate() {
   const nav = useNavigate()
   const fileRef = useRef<HTMLInputElement>(null)
+  const toast = useToast()
 
   const [categories, setCategories] = useState<Category[]>([])
   const [brands, setBrands] = useState<Brand[]>([])
@@ -25,7 +27,6 @@ export default function SellerProductCreate() {
   const [brandId, setBrandId] = useState<number | ''>('')
   const [image, setImage] = useState<File | null>(null)
 
-  const [err, setErr] = useState<string | null>(null)
   const [created, setCreated] = useState<{ sku: string; status: string } | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -41,14 +42,14 @@ export default function SellerProductCreate() {
   const subCats = topCat?.children || []
 
   const onSubmit = async (e: React.FormEvent) => {
-    e.preventDefault(); setErr(null)
-    if (!name.trim()) { setErr('Name is required.'); return }
+    e.preventDefault()
+    if (!name.trim()) { toast.error('Name is required.'); return }
     const p = parseFloat(price)
     const s = parseInt(stock, 10)
     const sd = parseInt(shippingDays, 10)
-    if (!isFinite(p) || p < 0) { setErr('Price is invalid.'); return }
-    if (!isFinite(s) || s < 0) { setErr('Quantity is invalid.'); return }
-    if (!isFinite(sd) || sd < 0) { setErr('Shipping days is invalid.'); return }
+    if (!isFinite(p) || p < 0) { toast.error('Price is invalid.'); return }
+    if (!isFinite(s) || s < 0) { toast.error('Quantity is invalid.'); return }
+    if (!isFinite(sd) || sd < 0) { toast.error('Shipping days is invalid.'); return }
 
     setSaving(true)
     try {
@@ -60,8 +61,9 @@ export default function SellerProductCreate() {
         brandId: brandId === '' ? null : brandId,
         image,
       })
+      toast.success(`Product submitted · SKU ${res.sku}`)
       setCreated({ sku: res.sku, status: res.status })
-    } catch (e) { setErr((e as Error).message) } finally { setSaving(false) }
+    } catch (e) { toast.error(e) } finally { setSaving(false) }
   }
 
   if (created) {
@@ -113,8 +115,6 @@ export default function SellerProductCreate() {
         <CardContent>
           <form onSubmit={onSubmit}>
             <Grid container spacing={2}>
-              {err && <Grid size={12}><Alert severity="error">{err}</Alert></Grid>}
-
               <Grid size={{ xs: 12, md: 8 }}>
                 <TextField label="Product name" value={name} onChange={(e) => setName(e.target.value)}
                   required fullWidth autoFocus />

@@ -1,26 +1,26 @@
 import { useState } from 'react'
-import { Box, Card, CardContent, TextField, Button, Typography, Alert, Stack, Chip } from '@mui/material'
+import { Box, Card, CardContent, TextField, Button, Typography, Stack, Chip } from '@mui/material'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../AuthContext'
+import { useToast } from '../Toast'
 
 export default function Login() {
   const { signIn } = useAuth()
   const nav = useNavigate()
   const loc = useLocation() as { state?: { from?: { pathname: string } } }
+  const toast = useToast()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setErr(null)
     setLoading(true)
     try {
       await signIn(username, password)
       nav(loc.state?.from?.pathname || '/')
     } catch (e) {
-      setErr((e as Error).message)
+      toast.error(e)
     } finally {
       setLoading(false)
     }
@@ -36,7 +36,6 @@ export default function Login() {
           </Typography>
           <form onSubmit={onSubmit}>
             <Stack spacing={2}>
-              {err && <Alert severity="error">{err}</Alert>}
               <TextField
                 label="Username" value={username} onChange={(e) => setUsername(e.target.value)}
                 autoFocus required fullWidth autoComplete="username"

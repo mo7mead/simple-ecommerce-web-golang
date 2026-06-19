@@ -1,41 +1,54 @@
 import { useEffect, useRef, useState } from 'react'
-import { Skeleton, Stack, Avatar } from '@mui/material'
+import {
+  Skeleton, Stack, Avatar, ToggleButton, ToggleButtonGroup, Paper, Table,
+  TableBody, TableCell, TableHead, TableRow, Typography, IconButton, Tooltip, Box,
+} from '@mui/material'
 import CollectionsOutlinedIcon from '@mui/icons-material/CollectionsOutlined'
 import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded'
 import CloudUploadOutlinedIcon from '@mui/icons-material/CloudUploadOutlined'
 import AddPhotoAlternateOutlinedIcon from '@mui/icons-material/AddPhotoAlternateOutlined'
 import RocketLaunchOutlinedIcon from '@mui/icons-material/RocketLaunchOutlined'
-import ErrorOutlineRoundedIcon from '@mui/icons-material/ErrorOutlineRounded'
+import GridViewRoundedIcon from '@mui/icons-material/GridViewRounded'
+import ViewListRoundedIcon from '@mui/icons-material/ViewListRounded'
 import { api, type Slide } from '../../api'
+import { useToast } from '../../Toast'
+
+type View = 'grid' | 'list'
 
 export default function AdminSlides() {
   const [slides, setSlides] = useState<Slide[] | null>(null)
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [file, setFile] = useState<File | null>(null)
-  const [err, setErr] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
+  const toast = useToast()
   const [dragActive, setDragActive] = useState(false)
+  const [view, setView] = useState<View>('grid')
   const fileRef = useRef<HTMLInputElement>(null)
 
   const load = () => api.adminSlides().then(s => setSlides(s || [])).catch(console.error)
   useEffect(() => { load() }, [])
 
   const onUpload = async (e: React.FormEvent) => {
-    e.preventDefault(); setErr(null)
-    if (!title.trim() || !file) { setErr('Title and image are required.'); return }
+    e.preventDefault()
+    if (!title.trim() || !file) { toast.error('Title and image are required.'); return }
     setUploading(true)
     try {
       await api.adminSlideUpload(title.trim(), body.trim(), file)
+      toast.success('Slide published.')
       setTitle(''); setBody(''); setFile(null)
       if (fileRef.current) fileRef.current.value = ''
       await load()
-    } catch (e) { setErr((e as Error).message) } finally { setUploading(false) }
+    } catch (e) { toast.error(e) } finally { setUploading(false) }
   }
 
   const onDelete = async (id: number) => {
     if (!confirm('Delete this slide?')) return
-    await api.adminSlideDelete(id); await load()
+    try {
+      await api.adminSlideDelete(id)
+      toast.success('Slide deleted.')
+      await load()
+    } catch (e) { toast.error(e) }
   }
 
   const onDrop = (e: React.DragEvent) => {
@@ -81,13 +94,6 @@ export default function AdminSlides() {
               <h2 className="mt-0.5 text-[16px] font-bold text-slate-900">Publish to home page</h2>
             </div>
             <form onSubmit={onUpload} className="space-y-4 p-5">
-              {err && (
-                <div className="flex items-start gap-2 rounded-lg bg-rose-50 px-3 py-2 text-[13px] text-rose-700 ring-1 ring-rose-100">
-                  <ErrorOutlineRoundedIcon sx={{ fontSize: 16, marginTop: '2px' }} />
-                  {err}
-                </div>
-              )}
-
               {/* Drop zone */}
               <div
                 onDragEnter={(e) => { e.preventDefault(); setDragActive(true) }}
@@ -180,11 +186,18 @@ export default function AdminSlides() {
 
         {/* List */}
         <div className="lg:col-span-8">
-          <div className="mb-2 flex items-center justify-between">
+          <div className="mb-2 flex items-center justify-between gap-3">
             <h2 className="text-[14px] font-bold text-slate-900">Active carousel</h2>
-            <span className="text-[11.5px] uppercase tracking-wider text-slate-400">
-              Order = position on home
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="text-[11.5px] uppercase tracking-wider text-slate-400">
+                Order = position on home
+              </span>
+              <ToggleButtonGroup value={view} exclusive size="small"
+                onChange={(_, v: View | null) => v && setView(v)}>
+                <ToggleButton value="grid"><GridViewRoundedIcon fontSize="small" /></ToggleButton>
+                <ToggleButton value="list"><ViewListRoundedIcon fontSize="small" /></ToggleButton>
+              </ToggleButtonGroup>
+            </div>
           </div>
 
           {!slides ? (
@@ -202,6 +215,63 @@ export default function AdminSlides() {
               <p className="text-[14px] font-semibold text-slate-900">No slides yet</p>
               <p className="text-[12.5px] text-slate-500">Upload your first hero image with the form on the left.</p>
             </div>
+          ) : view === 'list' ? (
+            <Paper variant="outlined" sx={{ borderRadius: 2.5, overflow: 'hidden' }}>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ width: 50 }}>#</TableCell>
+                    <TableCell sx={{ width: 80 }}></TableCell>
+                    <TableCell>Title</TableCell>
+                    <TableCell>Body</TableCell>
+                    <TableCell align="right">Added</TableCell>
+                    <TableCell align="right"></TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {slides.map((s, idx) => (
+                    <TableRow key={s.ID} hover>
+                      <TableCell>
+                        <Box sx={{
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          width: 26, height: 26, borderRadius: 1.5,
+                          bgcolor: 'rgba(99,102,241,0.1)', color: '#4f46e5',
+                          fontWeight: 700, fontSize: 12,
+                        }}>{idx + 1}</Box>
+                      </TableCell>
+                      <TableCell>
+                        <Avatar variant="rounded" src={s.ImagePath} alt={s.Title}
+                          sx={{ width: 64, height: 36 }} />
+                      </TableCell>
+                      <TableCell>
+                        <Typography sx={{ fontWeight: 600, fontSize: 14 }} noWrap>{s.Title}</Typography>
+                        <Typography sx={{ fontSize: 11, color: 'text.disabled', fontFamily: 'monospace' }}>
+                          ID {s.ID}
+                        </Typography>
+                      </TableCell>
+                      <TableCell sx={{ maxWidth: 320 }}>
+                        <Typography sx={{
+                          fontSize: 13, color: 'text.secondary',
+                          overflow: 'hidden', textOverflow: 'ellipsis',
+                          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                        }}>{s.Body || '—'}</Typography>
+                      </TableCell>
+                      <TableCell align="right" sx={{ fontSize: 12, color: 'text.secondary' }}>
+                        {new Date(s.CreatedAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </TableCell>
+                      <TableCell align="right">
+                        <Tooltip title="Delete">
+                          <IconButton size="small" onClick={() => onDelete(s.ID)}
+                            sx={{ color: 'text.secondary', '&:hover': { color: 'error.main', bgcolor: 'rgba(239,68,68,0.08)' } }}>
+                            <DeleteOutlineRoundedIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Paper>
           ) : (
             <ul className="list-none m-0 p-0 grid gap-3 sm:grid-cols-2">
               {slides.map((s, idx) => (

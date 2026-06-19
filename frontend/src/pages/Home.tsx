@@ -4,7 +4,10 @@ import BoltIcon from '@mui/icons-material/Bolt'
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import LocalOfferIcon from '@mui/icons-material/LocalOffer'
-import { api, type Slide, type FlashSale, type Brand } from '../api'
+import AddShoppingCartIcon from '@mui/icons-material/AddShoppingCart'
+import { api, type Slide, type FlashSale, type Brand, type Product } from '../api'
+import { useCart } from '../CartContext'
+import { useToast } from '../Toast'
 
 function ScrollRow({ children, itemWidth, gap = 16 }: { children: ReactNode; itemWidth: number; gap?: number }) {
   const ref = useRef<HTMLDivElement | null>(null)
@@ -104,12 +107,24 @@ export default function Home() {
   const [slides, setSlides] = useState<Slide[] | null>(null)
   const [flash, setFlash] = useState<FlashSale[] | null>(null)
   const [brands, setBrands] = useState<Brand[] | null>(null)
+  const [products, setProducts] = useState<Product[] | null>(null)
   const [activeSlide, setActiveSlide] = useState(0)
+  const [qtyByProduct, setQtyByProduct] = useState<Record<number, number>>({})
+  const { add: addToCart, items: cartItems } = useCart()
+  const toast = useToast()
+
+  const bumpQty = (id: number, delta: number, max: number) =>
+    setQtyByProduct(prev => {
+      const cur = prev[id] ?? 1
+      const next = Math.max(1, Math.min(max, cur + delta))
+      return { ...prev, [id]: next }
+    })
 
   useEffect(() => {
     api.slides().then(setSlides).catch(console.error)
     api.flashSales().then(setFlash).catch(console.error)
     api.brands().then(setBrands).catch(console.error)
+    api.products().then(setProducts).catch(console.error)
   }, [])
 
   const nextEnd = useMemo(() => {
@@ -244,6 +259,118 @@ export default function Home() {
               })}
             </ScrollRow>
           </div>
+        </div>
+      )}
+
+      {products && products.length > 0 && (
+        <div>
+          <div className="mb-3 flex items-end justify-between">
+            <h2 className="text-lg font-bold tracking-tight text-slate-900">Latest products</h2>
+            <span className="text-xs text-slate-500">{products.length} item{products.length === 1 ? '' : 's'}</span>
+          </div>
+          <ScrollRow itemWidth={220}>
+            {products.map((p) => {
+              const inCart = cartItems.find(x => x.id === p.id)?.qty ?? 0
+              const remaining = Math.max(0, p.stock - inCart)
+              const wanted = Math.min(qtyByProduct[p.id] ?? 1, Math.max(1, remaining))
+              return (
+              <div
+                key={p.id}
+                className="group flex w-[220px] flex-none flex-col overflow-hidden rounded-xl bg-white
+                           shadow-sm ring-1 ring-black/5 transition hover:-translate-y-1 hover:shadow-xl"
+                style={{ scrollSnapAlign: 'start' }}
+              >
+                <div className="relative aspect-square overflow-hidden bg-slate-100">
+                  {p.imagePath ? (
+                    <div
+                      className="h-full w-full bg-cover bg-center transition-transform duration-500 group-hover:scale-110"
+                      style={{ backgroundImage: `url(${p.imagePath})` }}
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-4xl text-slate-300">
+                      {p.name[0]?.toUpperCase() ?? '?'}
+                    </div>
+                  )}
+                  {p.stock <= 0 && (
+                    <div className="absolute right-2 top-2 rounded-full bg-slate-900/80 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
+                      Sold out
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-1 flex-col gap-1.5 p-3">
+                  <h3 className="line-clamp-2 text-sm font-semibold text-slate-900">{p.name}</h3>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-lg font-extrabold text-indigo-600">${p.price.toFixed(2)}</span>
+                    {p.brandName && (
+                      <span className="text-[11px] text-slate-500">{p.brandName}</span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    {p.stock > 0 ? `${p.stock} in stock` : 'Out of stock'}
+                    {inCart > 0 && ` · ${inCart} in cart`}
+                    {p.shippingDays > 0 && ` · ships ${p.shippingDays}d`}
+                  </p>
+                  {p.stock <= 0 ? (
+                    <button
+                      type="button"
+                      disabled
+                      className="mt-auto inline-flex items-center justify-center gap-1.5 rounded-lg
+                                 bg-slate-300 px-3 py-2 text-xs font-bold text-white"
+                    >
+                      Sold out
+                    </button>
+                  ) : remaining <= 0 ? (
+                    <button
+                      type="button"
+                      disabled
+                      className="mt-auto inline-flex items-center justify-center gap-1.5 rounded-lg
+                                 bg-slate-300 px-3 py-2 text-xs font-bold text-white"
+                      title="You already have the max in your cart"
+                    >
+                      Max in cart
+                    </button>
+                  ) : (
+                    <div className="mt-auto flex items-center gap-2">
+                      <div className="flex items-center rounded-lg border border-slate-200">
+                        <button
+                          type="button"
+                          onClick={() => bumpQty(p.id, -1, remaining)}
+                          disabled={wanted <= 1}
+                          className="h-8 w-7 text-slate-700 hover:bg-slate-50 disabled:text-slate-300"
+                          aria-label="Decrease quantity"
+                        >−</button>
+                        <span className="w-7 text-center text-xs font-semibold tabular-nums">
+                          {wanted}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => bumpQty(p.id, 1, remaining)}
+                          disabled={wanted >= remaining}
+                          className="h-8 w-7 text-slate-700 hover:bg-slate-50 disabled:text-slate-300"
+                          aria-label="Increase quantity"
+                        >+</button>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          addToCart(p, wanted)
+                          toast.success(`Added ${wanted} × "${p.name}" to cart`)
+                          setQtyByProduct(prev => ({ ...prev, [p.id]: 1 }))
+                        }}
+                        className="flex flex-1 items-center justify-center gap-1.5 rounded-lg
+                                   bg-indigo-600 px-2 py-2 text-xs font-bold text-white transition
+                                   hover:bg-indigo-700"
+                      >
+                        <AddShoppingCartIcon sx={{ fontSize: 16 }} />
+                        Add
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+              )
+            })}
+          </ScrollRow>
         </div>
       )}
 
