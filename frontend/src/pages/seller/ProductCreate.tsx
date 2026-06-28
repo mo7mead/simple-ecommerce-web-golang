@@ -7,7 +7,7 @@ import CloudUploadIcon from '@mui/icons-material/CloudUpload'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { Link as RouterLink, useNavigate } from 'react-router-dom'
 import { api, type Category, type Brand } from '../../api'
-import { useToast } from '../../Toast'
+import { useToast } from '../../components/Toast'
 
 export default function SellerProductCreate() {
   const nav = useNavigate()

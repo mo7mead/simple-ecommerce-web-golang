@@ -6,8 +6,8 @@ import {
 import PaymentsOutlinedIcon from '@mui/icons-material/PaymentsOutlined'
 import LocalShippingOutlinedIcon from '@mui/icons-material/LocalShippingOutlined'
 import { api } from '../../api'
-import { useToast } from '../../Toast'
-import { useAuth } from '../../AuthContext'
+import { useToast } from '../../components/Toast'
+import { useAuth } from '../../contexts/AuthContext'
 
 export default function AdminPayments() {
   const toast = useToast()

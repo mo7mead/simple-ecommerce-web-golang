@@ -13,7 +13,7 @@ import AddRoundedIcon from '@mui/icons-material/AddRounded'
 import BoltOutlinedIcon from '@mui/icons-material/BoltOutlined'
 import RocketLaunchOutlinedIcon from '@mui/icons-material/RocketLaunchOutlined'
 import { api, type AdminStats } from '../../api'
-import { useAuth } from '../../AuthContext'
+import { useAuth } from '../../contexts/AuthContext'
 
 const fmtDur = (s: number) => {
   if (s <= 0) return '0s'

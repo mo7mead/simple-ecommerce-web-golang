@@ -4,7 +4,7 @@ import {
   Avatar, Paper, Chip, Slider, ToggleButton, ToggleButtonGroup,
   Tooltip, IconButton, Divider, LinearProgress, MenuItem,
 } from '@mui/material'
-import { useToast } from '../../Toast'
+import { useToast } from '../../components/Toast'
 import CloudUploadIcon from '@mui/icons-material/CloudUpload'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlineOutlined'
 import BrushOutlinedIcon from '@mui/icons-material/BrushOutlined'
@@ -14,7 +14,7 @@ import SettingsBackupRestoreIcon from '@mui/icons-material/SettingsBackupRestore
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutlineOutlined'
 import InsightsOutlinedIcon from '@mui/icons-material/InsightsOutlined'
 import { api } from '../../api'
-import { useAuth } from '../../AuthContext'
+import { useAuth } from '../../contexts/AuthContext'
 
 const PRESETS = ['#4ea1ff', '#1c8bf2', '#7c4ddb', '#1f9e4f', '#e07b1c', '#d6336c', '#0f4c3a', '#0ea5e9']
 

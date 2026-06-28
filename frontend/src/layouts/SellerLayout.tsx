@@ -1,20 +1,26 @@
 import {
   Box, Drawer, AppBar, Toolbar, Typography, List, ListItem, ListItemButton,
   ListItemIcon, ListItemText, Avatar, IconButton, Divider, Tooltip,
+  Badge, Menu, MenuItem, Stack, Button,
 } from '@mui/material'
 import DashboardIcon from '@mui/icons-material/Dashboard'
 import Inventory2Icon from '@mui/icons-material/Inventory2'
+import ReceiptLongIcon from '@mui/icons-material/ReceiptLong'
 import HomeIcon from '@mui/icons-material/Home'
 import MenuOpenIcon from '@mui/icons-material/MenuOpen'
+import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone'
+import CircleIcon from '@mui/icons-material/Circle'
 import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom'
-import { useState, type ReactNode } from 'react'
-import { useAuth } from './AuthContext'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useAuth } from '../contexts/AuthContext'
+import { api, type AdminNotification } from '../api'
 
 const FULL = 220, MINI = 64
 
 const items = [
   { to: '/seller/dashboard', label: 'Dashboard', icon: <DashboardIcon /> },
   { to: '/seller/products', label: 'Products', icon: <Inventory2Icon /> },
+  { to: '/seller/orders', label: 'Orders', icon: <ReceiptLongIcon /> },
   { to: '/', label: 'Back to site', icon: <HomeIcon /> },
 ]
 
@@ -106,6 +112,7 @@ export default function SellerLayout({ children }: { children: ReactNode }) {
             </Typography>
             <Box component="span" sx={{ ml: 2, px: 1, py: 0.25, bgcolor: '#0f4c3a', color: '#6fdcb6', fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', borderRadius: 0.5 }}>Seller</Box>
             <Box sx={{ flex: 1 }} />
+            <NotificationBell />
             <IconButton onClick={async () => { await signOut(); nav('/login') }} size="small">
               <Avatar src={user?.avatarPath || undefined} sx={{ width: 32, height: 32, bgcolor: '#0f4c3a', fontSize: 14 }}>{initial}</Avatar>
             </IconButton>
@@ -115,4 +122,119 @@ export default function SellerLayout({ children }: { children: ReactNode }) {
       </Box>
     </Box>
   )
+}
+
+function NotificationBell() {
+  const [items, setItems] = useState<AdminNotification[]>([])
+  const [unread, setUnread] = useState(0)
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null)
+  const nav = useNavigate()
+  const prevUnread = useRef(0)
+
+  const refresh = useCallback(async () => {
+    try {
+      const r = await api.sellerNotifications(20)
+      setItems(r.items || [])
+      setUnread(r.unread)
+    } catch { /* keep last state */ }
+  }, [])
+
+  useEffect(() => {
+    refresh()
+    const id = window.setInterval(refresh, 30_000)
+    return () => window.clearInterval(id)
+  }, [refresh])
+
+  useEffect(() => {
+    prevUnread.current = unread
+  }, [unread])
+
+  const openMenu = async (e: React.MouseEvent<HTMLElement>) => {
+    setAnchor(e.currentTarget)
+    await refresh()
+  }
+  const closeMenu = () => setAnchor(null)
+
+  const handleClick = async (n: AdminNotification) => {
+    closeMenu()
+    if (!n.readAt) {
+      try {
+        await api.sellerNotificationsRead([n.id])
+        setItems(prev => prev.map(x => x.id === n.id ? { ...x, readAt: new Date().toISOString() } : x))
+        setUnread(u => Math.max(0, u - 1))
+      } catch { /* ignore */ }
+    }
+    if (n.link) nav(n.link)
+  }
+
+  const markAllRead = async () => {
+    try {
+      await api.sellerNotificationsRead()
+      setItems(prev => prev.map(x => ({ ...x, readAt: x.readAt || new Date().toISOString() })))
+      setUnread(0)
+    } catch { /* ignore */ }
+  }
+
+  return (
+    <>
+      <Tooltip title="Notifications">
+        <IconButton onClick={openMenu} size="small" sx={{ mr: 0.5 }} aria-label="Notifications">
+          <Badge badgeContent={unread} color="error" max={99}>
+            <NotificationsNoneIcon />
+          </Badge>
+        </IconButton>
+      </Tooltip>
+      <Menu
+        anchorEl={anchor} open={!!anchor} onClose={closeMenu}
+        slotProps={{ paper: { sx: { width: 360, maxHeight: 480, mt: 1 } } }}
+      >
+        <Stack direction="row" alignItems="center" sx={{ px: 2, py: 1 }}>
+          <Typography sx={{ fontWeight: 700, flex: 1 }}>Notifications</Typography>
+          {unread > 0 && (
+            <Button size="small" onClick={markAllRead}>Mark all read</Button>
+          )}
+        </Stack>
+        <Divider />
+        {items.length === 0 ? (
+          <Box sx={{ p: 4, textAlign: 'center' }}>
+            <NotificationsNoneIcon sx={{ fontSize: 32, color: '#cbd5e1', mb: 1 }} />
+            <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>
+              You're all caught up.
+            </Typography>
+          </Box>
+        ) : (
+          items.map(n => (
+            <MenuItem key={n.id} onClick={() => handleClick(n)}
+              sx={{ alignItems: 'flex-start', whiteSpace: 'normal', py: 1.25 }}>
+              <Box sx={{ width: 8, mt: 0.75, mr: 1.25, flexShrink: 0 }}>
+                {!n.readAt && <CircleIcon sx={{ fontSize: 8, color: 'error.main' }} />}
+              </Box>
+              <Box sx={{ minWidth: 0, flex: 1 }}>
+                <Typography sx={{ fontSize: 13, fontWeight: n.readAt ? 500 : 700 }}>
+                  {n.title}
+                </Typography>
+                <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
+                  {n.body}
+                </Typography>
+                <Typography sx={{ fontSize: 11, color: 'text.disabled', mt: 0.25 }}>
+                  {timeAgo(n.createdAt)}
+                </Typography>
+              </Box>
+            </MenuItem>
+          ))
+        )}
+      </Menu>
+    </>
+  )
+}
+
+function timeAgo(iso: string): string {
+  const diff = Date.now() - +new Date(iso)
+  const m = Math.floor(diff / 60_000)
+  if (m < 1) return 'Just now'
+  if (m < 60) return `${m} min ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  const d = Math.floor(h / 24)
+  return `${d}d ago`
 }

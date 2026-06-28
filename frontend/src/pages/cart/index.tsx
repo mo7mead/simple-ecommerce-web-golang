@@ -2,8 +2,8 @@ import { Link as RouterLink, useNavigate } from 'react-router-dom'
 import { Button, Stack } from '@mui/material'
 import DeleteOutlineIcon from '@mui/icons-material/Delete'
 import ShoppingBagOutlinedIcon from '@mui/icons-material/ShoppingBagOutlined'
-import { useCart } from '../CartContext'
-import { useAuth } from '../AuthContext'
+import { useCart } from '../../contexts/CartContext'
+import { useAuth } from '../../contexts/AuthContext'
 
 export default function Cart() {
   const { items, total: subtotal, setQty, remove, clear } = useCart()

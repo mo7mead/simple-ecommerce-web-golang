@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Link as RouterLink, useNavigate } from 'react-router-dom'
-import { Button, TextField, Stack, Radio } from '@mui/material'
+import { Button, TextField, Stack, Radio, MenuItem, Chip } from '@mui/material'
 import LocalShippingOutlinedIcon from '@mui/icons-material/LocalShippingOutlined'
 import PaymentsOutlinedIcon from '@mui/icons-material/PaymentsOutlined'
-import { api } from '../api'
-import { useCart } from '../CartContext'
-import { useAuth } from '../AuthContext'
-import { useToast } from '../Toast'
+import { api, type Address } from '../../api'
+import { useCart } from '../../contexts/CartContext'
+import { useAuth } from '../../contexts/AuthContext'
+import { useToast } from '../../components/Toast'
 
 export default function Checkout() {
   const { items, total: subtotal, clear } = useCart()
@@ -19,10 +19,32 @@ export default function Checkout() {
   const [address, setAddress] = useState('')
   const [paymentMethod, setPaymentMethod] = useState<'cod'>('cod')
   const [busy, setBusy] = useState(false)
+  const [savedAddresses, setSavedAddresses] = useState<Address[]>([])
+  const [selectedAddrId, setSelectedAddrId] = useState<number | 'new'>('new')
 
   useEffect(() => {
-    if (user) setName(user.displayName || user.username)
+    if (!user) return
+    setName(user.displayName || user.username)
+    api.addresses().then(list => {
+      const arr = list || []
+      setSavedAddresses(arr)
+      const def = arr.find(a => a.isDefault) || arr[0]
+      if (def) {
+        setSelectedAddrId(def.id)
+        setName(def.recipient); setPhone(def.phone); setAddress(def.line)
+      }
+    }).catch(() => setSavedAddresses([]))
   }, [user])
+
+  const pickAddress = (id: number | 'new') => {
+    setSelectedAddrId(id)
+    if (id === 'new') {
+      setName(user?.displayName || user?.username || ''); setPhone(''); setAddress('')
+      return
+    }
+    const a = savedAddresses.find(x => x.id === id)
+    if (a) { setName(a.recipient); setPhone(a.phone); setAddress(a.line) }
+  }
 
   if (!user) {
     return (
@@ -85,6 +107,21 @@ export default function Checkout() {
                 <h2 className="text-base font-bold text-slate-900">Shipping details</h2>
               </div>
               <Stack spacing={2}>
+                {savedAddresses.length > 0 && (
+                  <TextField
+                    select size="small" label="Saved address" value={selectedAddrId}
+                    onChange={e => pickAddress(e.target.value === 'new' ? 'new' : Number(e.target.value))}
+                    fullWidth
+                  >
+                    {savedAddresses.map(a => (
+                      <MenuItem key={a.id} value={a.id}>
+                        {a.label || a.recipient} — {a.line.split('\n')[0].slice(0, 40)}
+                        {a.isDefault && <Chip label="Default" size="small" sx={{ ml: 1 }} />}
+                      </MenuItem>
+                    ))}
+                    <MenuItem value="new">Use a new address</MenuItem>
+                  </TextField>
+                )}
                 <TextField label="Full name" size="small" value={name}
                   onChange={e => setName(e.target.value)} required fullWidth />
                 <TextField label="Phone" size="small" value={phone}

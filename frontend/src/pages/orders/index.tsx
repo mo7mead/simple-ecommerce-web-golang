@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
 import { Button, Stack, Chip } from '@mui/material'
 import ReceiptLongOutlinedIcon from '@mui/icons-material/ReceiptLongOutlined'
-import { api, type Order } from '../api'
+import { api, type Order } from '../../api'
 
 const STATUS_COLOR: Record<Order['status'], 'default' | 'warning' | 'info' | 'success' | 'error'> = {
   pending: 'warning',

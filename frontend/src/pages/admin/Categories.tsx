@@ -5,7 +5,7 @@ import {
   Dialog, DialogTitle, DialogContent, DialogActions, ToggleButton, ToggleButtonGroup,
   Table, TableBody, TableCell, TableHead, TableRow, ListItemIcon, ListItemText,
 } from '@mui/material'
-import { useToast } from '../../Toast'
+import { useToast } from '../../components/Toast'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlineOutlined'
 import CategoryOutlinedIcon from '@mui/icons-material/CategoryOutlined'
 import SearchIcon from '@mui/icons-material/Search'
@@ -15,7 +15,7 @@ import AddIcon from '@mui/icons-material/Add'
 import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined'
 import ViewListRoundedIcon from '@mui/icons-material/ViewListRounded'
 import { api } from '../../api'
-import { ICONS, CategoryIcon, type CategoryIconDef } from '../../categoryIcons'
+import { ICONS, CategoryIcon, type CategoryIconDef } from '../../components/categoryIcons'
 
 type Cat = { id: number; parentId: number | null; name: string; slug: string; icon: string; position: number }
 type View = 'tree' | 'list'

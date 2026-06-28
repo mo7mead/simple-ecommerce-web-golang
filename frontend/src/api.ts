@@ -51,6 +51,24 @@ export interface PaymentsConfig {
   shippingFee: number
 }
 
+export interface Address {
+  id: number
+  label: string
+  recipient: string
+  phone: string
+  line: string
+  isDefault: boolean
+  createdAt: string
+}
+
+export interface AddressInput {
+  label: string
+  recipient: string
+  phone: string
+  line: string
+  isDefault: boolean
+}
+
 export interface Category {
   id: number
   parentId?: number
@@ -138,6 +156,11 @@ export const api = {
   me: () => request<{ user: User | null }>('/api/me'),
   login: (username: string, password: string) =>
     request<{ user: User }>('/api/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    }),
+  register: (username: string, password: string) =>
+    request<{ user: User }>('/api/register', {
       method: 'POST',
       body: JSON.stringify({ username, password }),
     }),
@@ -257,6 +280,13 @@ export const api = {
   },
   sellerProductDelete: (id: number) =>
     request<{ ok: boolean }>('/api/seller/products/delete', { method: 'POST', body: JSON.stringify({ id }) }),
+  sellerOrders: () => request<SellerOrder[] | null>('/api/seller/orders'),
+  sellerNotifications: (limit = 25) =>
+    request<{ items: AdminNotification[]; unread: number }>(`/api/seller/notifications?limit=${limit}`),
+  sellerNotificationsRead: (ids?: number[]) =>
+    request<{ ok: boolean; marked: number }>('/api/seller/notifications/read', {
+      method: 'POST', body: JSON.stringify({ ids: ids || [] }),
+    }),
 
   adminProducts: (status?: 'pending' | 'approved' | 'rejected' | 'all') =>
     request<Product[] | null>(`/api/admin/products${status ? `?status=${status}` : ''}`),
@@ -290,6 +320,16 @@ export const api = {
       method: 'POST', body: JSON.stringify({ id, status }),
     }),
   myOrders: () => request<Order[] | null>('/api/orders'),
+
+  addresses: () => request<Address[] | null>('/api/addresses'),
+  addressCreate: (body: AddressInput) =>
+    request<Address>('/api/addresses', { method: 'POST', body: JSON.stringify(body) }),
+  addressUpdate: (id: number, body: AddressInput) =>
+    request<Address>(`/api/addresses/${id}`, { method: 'POST', body: JSON.stringify(body) }),
+  addressDelete: (id: number) =>
+    request<{ ok: boolean }>(`/api/addresses/${id}`, { method: 'DELETE' }),
+  addressSetDefault: (id: number) =>
+    request<{ ok: boolean }>(`/api/addresses/${id}/default`, { method: 'POST' }),
   createOrder: (body: {
     customerName: string; phone: string; address: string;
     paymentMethod: string;
@@ -304,6 +344,20 @@ export const api = {
     request<{ ok: boolean; marked: number }>('/api/admin/notifications/read', {
       method: 'POST', body: JSON.stringify({ ids: ids || [] }),
     }),
+}
+
+export interface SellerOrder {
+  id: number
+  ref: string
+  username: string
+  customerName: string
+  phone: string
+  address: string
+  items: OrderItem[]
+  subtotal: number
+  paymentMethod: string
+  status: 'pending' | 'shipped' | 'delivered' | 'cancelled'
+  createdAt: string
 }
 
 export interface AdminNotification {

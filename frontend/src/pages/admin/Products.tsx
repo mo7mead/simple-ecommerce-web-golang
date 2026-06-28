@@ -6,7 +6,7 @@ import {
   TextField, InputAdornment, IconButton, Menu, MenuItem, ListItemIcon, ListItemText,
   TableSortLabel, Divider, Checkbox, Slide, TablePagination,
 } from '@mui/material'
-import { useToast } from '../../Toast'
+import { useToast } from '../../components/Toast'
 import CheckIcon from '@mui/icons-material/Check'
 import CloseIcon from '@mui/icons-material/Close'
 import BoltIcon from '@mui/icons-material/Bolt'

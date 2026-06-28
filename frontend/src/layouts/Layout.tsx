@@ -21,10 +21,10 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import StorefrontIcon from '@mui/icons-material/Storefront'
 import { Link as RouterLink, NavLink, useNavigate } from 'react-router-dom'
 import { useState, useEffect, useMemo, useRef, type ReactNode } from 'react'
-import { useAuth } from './AuthContext'
-import { api, type Category } from './api'
-import { CategoryIcon } from './categoryIcons'
-import { useCart } from './CartContext'
+import { useAuth } from '../contexts/AuthContext'
+import { api, type Category } from '../api'
+import { CategoryIcon } from '../components/categoryIcons'
+import { useCart } from '../contexts/CartContext'
 
 const flatten = (cats: Category[]): Category[] => {
   const out: Category[] = []
@@ -416,7 +416,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                       '&.active': { color: 'primary.light' },
                     }}
                   >
-                    {user.role === 'seller' ? 'Seller console' : 'Admin'}
+                    {user.role === 'seller' ? 'Seller console' : user.role === 'buyer' ? 'My account' : 'Admin'}
                   </Button>
                 )}
               </Stack>

@@ -11,7 +11,7 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import RefreshOutlinedIcon from '@mui/icons-material/RefreshOutlined'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { api, type Order } from '../../api'
-import { useToast } from '../../Toast'
+import { useToast } from '../../components/Toast'
 
 const STATUSES: Order['status'][] = ['pending', 'shipped', 'delivered', 'cancelled']
 

@@ -5,7 +5,7 @@ import {
   ToggleButtonGroup, LinearProgress, Tooltip, Divider, InputAdornment, Paper,
   Table, TableBody, TableCell, TableHead, TableRow,
 } from '@mui/material'
-import { useToast } from '../../Toast'
+import { useToast } from '../../components/Toast'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlineOutlined'
 import CloudUploadIcon from '@mui/icons-material/CloudUpload'
 import BoltIcon from '@mui/icons-material/Bolt'

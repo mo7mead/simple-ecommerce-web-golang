@@ -4,15 +4,15 @@ import {
   Chip, Grid, Divider, IconButton, Tooltip, Dialog, DialogTitle, DialogContent,
   DialogContentText, DialogActions,
 } from '@mui/material'
-import { useToast } from '../Toast'
+import { useToast } from '../../components/Toast'
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
 import DeleteIcon from '@mui/icons-material/Delete'
 import ImageIcon from '@mui/icons-material/Image'
 import EditIcon from '@mui/icons-material/Edit'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import { Menu, MenuItem, ListItemIcon } from '@mui/material'
-import { api, type User } from '../api'
-import { useAuth } from '../AuthContext'
+import { api, type User } from '../../api'
+import { useAuth } from '../../contexts/AuthContext'
 
 export default function Profile() {
   const { user: ctxUser, refresh } = useAuth()

@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { Box, Card, CardContent, TextField, Button, Typography, Stack, Chip } from '@mui/material'
-import { useNavigate, useLocation } from 'react-router-dom'
-import { useAuth } from '../AuthContext'
-import { useToast } from '../Toast'
+import { Box, Card, CardContent, TextField, Button, Typography, Stack, Chip, Link } from '@mui/material'
+import { useNavigate, useLocation, Link as RouterLink } from 'react-router-dom'
+import { useAuth } from '../../contexts/AuthContext'
+import { useToast } from '../../components/Toast'
 
 export default function Login() {
   const { signIn } = useAuth()
@@ -54,7 +54,14 @@ export default function Login() {
             <Stack direction="row" spacing={1}>
               <Chip size="small" label="admin / admin" onClick={() => { setUsername('admin'); setPassword('admin') }} />
               <Chip size="small" label="seller / seller" onClick={() => { setUsername('seller'); setPassword('seller') }} />
+              <Chip size="small" label="buyer / buyer" onClick={() => { setUsername('buyer'); setPassword('buyer') }} />
             </Stack>
+          </Box>
+          <Box sx={{ mt: 2, textAlign: 'center' }}>
+            <Typography sx={{ fontSize: 14, color: 'text.secondary' }}>
+              No account?{' '}
+              <Link component={RouterLink} to="/register">Create one</Link>
+            </Typography>
           </Box>
         </CardContent>
       </Card>

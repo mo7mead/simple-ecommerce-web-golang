@@ -11,7 +11,7 @@ import RocketLaunchOutlinedIcon from '@mui/icons-material/RocketLaunchOutlined'
 import GridViewRoundedIcon from '@mui/icons-material/GridViewRounded'
 import ViewListRoundedIcon from '@mui/icons-material/ViewListRounded'
 import { api, type Slide } from '../../api'
-import { useToast } from '../../Toast'
+import { useToast } from '../../components/Toast'
 
 type View = 'grid' | 'list'
 

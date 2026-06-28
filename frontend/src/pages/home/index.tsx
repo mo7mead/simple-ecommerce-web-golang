@@ -5,9 +5,9 @@ import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import LocalOfferIcon from '@mui/icons-material/LocalOffer'
 import AddShoppingCartIcon from '@mui/icons-material/AddShoppingCart'
-import { api, type Slide, type FlashSale, type Brand, type Product } from '../api'
-import { useCart } from '../CartContext'
-import { useToast } from '../Toast'
+import { api, type Slide, type FlashSale, type Brand, type Product } from '../../api'
+import { useCart } from '../../contexts/CartContext'
+import { useToast } from '../../components/Toast'
 
 function ScrollRow({ children, itemWidth, gap = 16 }: { children: ReactNode; itemWidth: number; gap?: number }) {
   const ref = useRef<HTMLDivElement | null>(null)

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { api, type User, type SiteSettings } from './api'
+import { api, type User, type SiteSettings } from '../api'
 
 interface AuthState {
   user: User | null
@@ -7,6 +7,7 @@ interface AuthState {
   loading: boolean
   refresh: () => Promise<void>
   signIn: (username: string, password: string) => Promise<void>
+  signUp: (username: string, password: string) => Promise<void>
   signOut: () => Promise<void>
   setUser: (u: User | null) => void
 }
@@ -39,13 +40,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(res.user)
   }
 
+  const signUp = async (username: string, password: string) => {
+    const res = await api.register(username, password)
+    setUser(res.user)
+  }
+
   const signOut = async () => {
     await api.logout()
     setUser(null)
   }
 
   return (
-    <Ctx.Provider value={{ user, settings, loading, refresh, signIn, signOut, setUser }}>
+    <Ctx.Provider value={{ user, settings, loading, refresh, signIn, signUp, signOut, setUser }}>
       {children}
     </Ctx.Provider>
   )

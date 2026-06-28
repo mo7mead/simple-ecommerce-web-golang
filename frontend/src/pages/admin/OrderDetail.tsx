@@ -13,7 +13,7 @@ import PhoneOutlinedIcon from '@mui/icons-material/Phone'
 import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined'
 import PrintOutlinedIcon from '@mui/icons-material/Print'
 import { api, type Order } from '../../api'
-import { useToast } from '../../Toast'
+import { useToast } from '../../components/Toast'
 
 const STATUSES: Order['status'][] = ['pending', 'shipped', 'delivered', 'cancelled']
 

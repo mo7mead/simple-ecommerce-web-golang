@@ -47,6 +47,9 @@ func main() {
 	if err := st.EnsureUser(ctx, "seller", "seller", store.RoleSeller); err != nil {
 		log.Fatalf("seed seller: %v", err)
 	}
+	if err := st.EnsureUser(ctx, "buyer", "buyer", store.RoleBuyer); err != nil {
+		log.Fatalf("seed buyer: %v", err)
+	}
 
 	go purgeLoop(st)
 

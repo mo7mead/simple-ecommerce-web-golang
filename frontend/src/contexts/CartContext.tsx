@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import type { Product } from './api'
+import type { Product } from '../api'
 
 export interface CartItem {
   id: number

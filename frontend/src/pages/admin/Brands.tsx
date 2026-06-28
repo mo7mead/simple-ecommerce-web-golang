@@ -4,7 +4,7 @@ import {
   Skeleton, Link, Paper, ToggleButton, ToggleButtonGroup, InputAdornment,
   Tooltip, Chip, Avatar, Divider, Table, TableBody, TableCell, TableHead, TableRow,
 } from '@mui/material'
-import { useToast } from '../../Toast'
+import { useToast } from '../../components/Toast'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlineOutlined'
 import CloudUploadIcon from '@mui/icons-material/CloudUpload'
 import StorefrontIcon from '@mui/icons-material/Storefront'

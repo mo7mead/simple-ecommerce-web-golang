@@ -26,12 +26,12 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import RefreshOutlinedIcon from '@mui/icons-material/RefreshOutlined'
 import { cloneElement, useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom'
-import { useAuth } from './AuthContext'
-import { api, type AdminNotification } from './api'
+import { useAuth } from '../contexts/AuthContext'
+import { api, type AdminNotification } from '../api'
 import CircleIcon from '@mui/icons-material/Circle'
 import VolumeUpOutlinedIcon from '@mui/icons-material/VolumeUpOutlined'
 import VolumeOffOutlinedIcon from '@mui/icons-material/VolumeOffOutlined'
-import { playNotifSound } from './notifySound'
+import { playNotifSound } from '../lib/notifySound'
 
 const FULL = 252
 const MINI = 68

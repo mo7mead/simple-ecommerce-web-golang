@@ -1,14 +1,16 @@
 import { ThemeProvider, createTheme, CssBaseline, CircularProgress, Box } from '@mui/material'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import { AuthProvider, useAuth } from './AuthContext'
-import { ToastProvider } from './Toast'
-import { CartProvider } from './CartContext'
-import Layout from './Layout'
-import AdminLayout from './AdminLayout'
-import SellerLayout from './SellerLayout'
-import Home from './pages/Home'
-import Login from './pages/Login'
-import Profile from './pages/Profile'
+import { AuthProvider, useAuth } from './contexts/AuthContext'
+import { ToastProvider } from './components/Toast'
+import { CartProvider } from './contexts/CartContext'
+import Layout from './layouts/Layout'
+import AdminLayout from './layouts/AdminLayout'
+import SellerLayout from './layouts/SellerLayout'
+import BuyerLayout from './layouts/BuyerLayout'
+import Home from './pages/home'
+import Login from './pages/login'
+import Register from './pages/register'
+import Profile from './pages/profile'
 import AdminDashboard from './pages/admin/Dashboard'
 import AdminUsers from './pages/admin/Users'
 import AdminSessions from './pages/admin/Sessions'
@@ -18,16 +20,21 @@ import AdminCategories from './pages/admin/Categories'
 import AdminBranding from './pages/admin/Branding'
 import AdminFlashSales from './pages/admin/FlashSales'
 import AdminBrands from './pages/admin/Brands'
+import BuyerDashboard from './pages/buyer/Dashboard'
+import BuyerOrders from './pages/buyer/Orders'
+import BuyerAddresses from './pages/buyer/Addresses'
+import BuyerBilling from './pages/buyer/Billing'
 import SellerDashboard from './pages/seller/Dashboard'
 import SellerProducts from './pages/seller/Products'
 import SellerProductCreate from './pages/seller/ProductCreate'
+import SellerOrders from './pages/seller/Orders'
 import AdminProducts from './pages/admin/Products'
 import AdminPayments from './pages/admin/Payments'
 import AdminOrders from './pages/admin/Orders'
 import AdminOrderDetail from './pages/admin/OrderDetail'
-import Cart from './pages/Cart'
-import Checkout from './pages/Checkout'
-import Orders from './pages/Orders'
+import Cart from './pages/cart'
+import Checkout from './pages/checkout'
+import Orders from './pages/orders'
 
 function Protected({ children, role }: { children: React.ReactNode; role?: string }) {
   const { user, loading } = useAuth()
@@ -53,6 +60,7 @@ function ThemedApp() {
 
   const adminPage = (el: React.ReactNode) => <Protected role="admin"><AdminLayout>{el}</AdminLayout></Protected>
   const sellerPage = (el: React.ReactNode) => <Protected role="seller"><SellerLayout>{el}</SellerLayout></Protected>
+  const buyerPage = (el: React.ReactNode) => <Protected role="buyer"><BuyerLayout>{el}</BuyerLayout></Protected>
 
   return (
     <ThemeProvider theme={theme}>
@@ -75,9 +83,17 @@ function ThemedApp() {
         <Route path="/admin/orders/:ref" element={adminPage(<AdminOrderDetail />)} />
         <Route path="/admin/*" element={adminPage(<Navigate to="/admin/dashboard" replace />)} />
 
+        <Route path="/buyer/dashboard" element={buyerPage(<BuyerDashboard />)} />
+        <Route path="/buyer/orders" element={buyerPage(<BuyerOrders />)} />
+        <Route path="/buyer/addresses" element={buyerPage(<BuyerAddresses />)} />
+        <Route path="/buyer/billing" element={buyerPage(<BuyerBilling />)} />
+        <Route path="/buyer/profile" element={buyerPage(<Profile />)} />
+        <Route path="/buyer/*" element={buyerPage(<Navigate to="/buyer/dashboard" replace />)} />
+
         <Route path="/seller/dashboard" element={sellerPage(<SellerDashboard />)} />
         <Route path="/seller/products" element={sellerPage(<SellerProducts />)} />
         <Route path="/seller/products/create" element={sellerPage(<SellerProductCreate />)} />
+        <Route path="/seller/orders" element={sellerPage(<SellerOrders />)} />
         <Route path="/seller/*" element={sellerPage(<Navigate to="/seller/dashboard" replace />)} />
 
         <Route path="*" element={
@@ -85,6 +101,7 @@ function ThemedApp() {
             <Routes>
               <Route path="/" element={<Home />} />
               <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
               <Route path="/profile" element={<Protected><Profile /></Protected>} />
               <Route path="/cart" element={<Cart />} />
               <Route path="/checkout" element={<Checkout />} />
